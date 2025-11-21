@@ -1,0 +1,25 @@
+{
+  "name": "aicoder-mini",
+  "version": "1.0.0",
+  "description": "Fast, lightweight AI-assisted development that runs anywhere",
+  "main": "src/index.ts",
+  "type": "module",
+  "scripts": {
+    "build": "bun build --target node src/index.ts --outdir ./dist",
+    "build:min": "bun build --target node --minify-whitespace --minify-syntax --minify-identifiers src/index.ts --outdir ./dist",
+    "dev": "bun src/index.ts",
+    "start": "bun src/index.ts",
+    "test": "bun test.ts"
+  },
+  "bin": {
+    "aicoder-mini": "./bin/aicoder-mini"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.3.2",
+    "@types/node": "^20.0.0",
+    "typescript": "^5.0.0"
+  },
+  "keywords": ["ai", "coding", "cli", "assistant", "development"],
+  "author": "AI Coder Team",
+  "license": "Apache-2.0"
+}

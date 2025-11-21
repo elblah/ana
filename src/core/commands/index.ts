@@ -1,0 +1,12 @@
+export { BaseCommand, type CommandResult, type CommandContext } from './base.js';
+export { HelpCommand } from './help.js';
+export { QuitCommand } from './quit.js';
+export { ClearCommand } from './clear.js';
+export { StatsCommand } from './stats.js';
+export { ResetCommand } from './reset.js';
+export { SaveCommand } from './save.js';
+export { LoadCommand } from './load.js';
+export { CompactCommand } from './compact.js';
+export { SandboxCommand } from './sandbox.js';
+export { EditCommand } from './edit.js';
+export { CommandRegistry } from './registry.js';
