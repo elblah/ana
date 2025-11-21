@@ -9,6 +9,7 @@ import { TempUtils } from './temp-utils.js';
 import { Stats } from './stats.js';
 import { PromptHistory } from './prompt-history.js';
 import { ContextBar } from './context-bar.js';
+import { getSnippetNames } from './snippet-utils.js';
 
 export class InputHandler {
   private history: string[] = [];
@@ -32,7 +33,29 @@ export class InputHandler {
       terminal: true,
       history: this.history,
       historySize: 100,
-      prompt: '' // No prompt - completely invisible
+      prompt: '', // No prompt - completely invisible
+      completer: (line: string, callback: (err: any, result?: [string[], string]) => void) => {
+        // Split into words and find the last one starting with @@
+        const words = line.split(' ');
+        const lastWord = words[words.length - 1];
+        
+        if (lastWord.startsWith('@@')) {
+          const names = getSnippetNames();
+          const prefix = lastWord.slice(2).toLowerCase();
+          const hits = names.filter(n => n.toLowerCase().startsWith(prefix));
+          
+          if (hits.length > 0) {
+            // Replace last word with completion
+            words[words.length - 1] = '@@' + hits[0];
+            const completedLine = words.join(' ');
+            callback(null, [[completedLine], line]);
+          } else {
+            callback(null, [[], line]);
+          }
+        } else {
+          callback(null, [[], line]);
+        }
+      }
     });
 
     // CRITICAL: Capture SIGINT from persistent readline to prevent bubbling to firejail
@@ -61,6 +84,8 @@ export class InputHandler {
       // By handling the event in the readline interface, we prevent the default suspend behavior
     });
   }
+
+
 
   /**
    * Set the stats context for the input handler

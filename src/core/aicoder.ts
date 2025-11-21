@@ -14,6 +14,8 @@ import { DetailMode } from './detail-mode.js';
 import { pluginSystem } from './plugin-system.js';
 import { ContextBar } from './context-bar.js';
 import { PromptBuilder } from '../prompts/prompt-builder.js';
+import { expandSnippets } from './snippet-utils.js';
+import { Config } from './config.js';
 
 
 export class AICoder {
@@ -259,11 +261,15 @@ export class AICoder {
             this.inputHandler.addToHistory(result.message);
           }
         } else {
-          // Add to history for non-commands
+          const processedInput = expandSnippets(trimmedInput);
+          if (processedInput !== trimmedInput) {
+            console.log(`${Config.colors.cyan}[Snippets expanded]${Config.colors.reset}`);
+          }
+          // Original to history/stats
           this.inputHandler.addToHistory(trimmedInput);
           this.stats.setLastUserPrompt(trimmedInput);
-          // Add user message to history
-          this.messageHistory.addUserMessage(trimmedInput);
+          // Expanded to AI
+          this.messageHistory.addUserMessage(processedInput);
         }
 
         // Process with AI (with fallback for when API is down)
@@ -310,8 +316,8 @@ export class AICoder {
           return;
         }
       } else {
-        // Add user message to history
-        this.messageHistory.addUserMessage(userInput);
+        const processedInput = expandSnippets(userInput);
+        this.messageHistory.addUserMessage(processedInput);
       }
       
       // Process with AI
@@ -497,8 +503,7 @@ console.log(`${Config.colors.bold}${Config.colors.green}AI:${Config.colors.reset
    * Execute tool calls (internal tools only)
    */
   private async executeToolCalls(toolCalls: ToolCall[]): Promise<void> {
-    // Clear preview tracking for new batch of tool calls
-    this.toolManager.clearPreviewTracking();
+
     for (const toolCall of toolCalls) {
       const { name } = toolCall.function;
       const toolDef = this.toolManager.getToolDefinition(name);

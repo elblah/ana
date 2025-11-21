@@ -91,7 +91,7 @@ export const TOOL_DEFINITION = {
         warning: exists && !FileUtils.wasFileRead(path) 
           ? 'File exists but was not read first - potential overwrite'
           : undefined,
-        canApprove: true,
+        canApprove: diffResult.exitCode === 1, // Only approve if there are actual differences
         isDiff: true
       };
       

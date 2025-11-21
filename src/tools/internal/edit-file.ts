@@ -186,17 +186,18 @@ PERFORMANCE NOTE:
         await Bun.write(tempNew, newContent);
         
         // Generate diff using system diff command
-        
         const diffResult = Bun.spawnSync(['diff', '-u', tempOld, tempNew], {
           stdout: 'pipe',
           stderr: 'pipe'
         });
         
+        let hasChanges = false;
         if (diffResult.exitCode === 0) {
           diffContent = 'No changes - content is identical';
         } else if (diffResult.exitCode === 1) {
           // Differences found - get raw diff output
           diffContent = new TextDecoder().decode(diffResult.stdout);
+          hasChanges = true;
         } else {
           diffContent = `Error generating diff: ${new TextDecoder().decode(diffResult.stderr)}`;
         }
@@ -204,11 +205,21 @@ PERFORMANCE NOTE:
         // Cleanup temp files
         await Bun.file(tempOld).delete().catch(() => {});
         await Bun.file(tempNew).delete().catch(() => {});
+        
+        return {
+          tool: 'edit_file',
+          summary: `Edit file: ${path}`,
+          content: diffContent,
+          warning: warning || undefined,
+          canApprove: hasChanges,
+          isDiff: true
+        };
       }
       
+      // For new file creation (old_string is empty)
       return {
         tool: 'edit_file',
-        summary: old_string === '' ? `Create file: ${path}` : `Edit file: ${path}`,
+        summary: `Create file: ${path}`,
         content: diffContent,
         warning: warning || undefined,
         canApprove: true,

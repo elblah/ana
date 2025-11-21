@@ -47,7 +47,7 @@ export class ToolManager {
   private tools: Map<string, ToolDefinition> = new Map();
   private currentDir: string;
   private readFiles: Set<string> = new Set(); // Track which files have been read
-  private previewedCalls: Set<string> = new Set(); // Track which tool calls already showed preview
+
 
   constructor(stats: Stats) {
     this.stats = stats;
@@ -144,13 +144,7 @@ export class ToolManager {
         throw new Error(`Invalid JSON in tool arguments: ${error}. Raw arguments: ${args.substring(0, 200)}${args.length > 200 ? '...' : ''}`);
       }
 
-      // Generate and show preview if available and not skipped
-      if (!skipPreview) {
-        const preview = await this.generatePreview(name, argsObj);
-        if (preview) {
-          console.log(ToolFormatter.formatPreview(preview));
-        }
-      }
+
 
       // Call plugin beforeTool hook
       const hookResult = pluginSystem.beforeToolCall(name, argsObj);
@@ -402,12 +396,7 @@ export class ToolManager {
     return JSON.stringify(args, null, 2);
   }
 
-  /**
-   * Clear preview tracking (called at start of new tool execution batch)
-   */
-  clearPreviewTracking(): void {
-    this.previewedCalls.clear();
-  }
+
 
   /**
    * Generate preview for a tool call (if supported)
@@ -418,20 +407,8 @@ export class ToolManager {
       return null;
     }
 
-    // Create unique key for this tool call (toolName + path if exists)
-    const previewKey = args.path ? `${toolName}:${args.path}` : toolName;
-
-    // If preview already shown for this call, return null
-    if (this.previewedCalls.has(previewKey)) {
-      return null;
-    }
-
     try {
       const preview = await toolDef.generatePreview(args);
-      if (preview) {
-        // Mark this preview as shown
-        this.previewedCalls.add(previewKey);
-      }
       return preview;
     } catch (error) {
       console.error(`${Config.colors.red}[!] Preview generation failed for ${toolName}: ${error}${Config.colors.reset}`);

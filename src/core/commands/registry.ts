@@ -13,6 +13,7 @@ import { RetryCommand } from './retry.js';
 import { MemoryCommand } from './memory.js';
 import { YoloCommand } from './yolo.js';
 import { DetailCommand } from './detail.js';
+import { SnippetsCommand } from './snippets.js';
 import { Config } from '../config.js';
 
 export class CommandRegistry {
@@ -35,6 +36,7 @@ export class CommandRegistry {
     const memoryCmd = new MemoryCommand(context);
     const yoloCmd = new YoloCommand(context);
     const detailCmd = new DetailCommand();
+    const snippetsCmd = new SnippetsCommand(context);
 
     this.registerCommand(helpCmd);
     this.registerCommand(quitCmd);
@@ -48,6 +50,7 @@ export class CommandRegistry {
     this.registerCommand(editCmd);
     this.registerCommand(retryCmd);
     this.registerCommand(memoryCmd);
+    this.registerCommand(snippetsCmd);
     this.registerCommand(yoloCmd);
     this.registerCommand(detailCmd);
   }

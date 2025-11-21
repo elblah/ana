@@ -4,8 +4,8 @@ import { Config } from '../config.js';
 const colors = Config.colors;
 
 export class SandboxCommand extends BaseCommand {
-  protected name = 'sandbox';
-  protected description = 'Show or configure sandbox status';
+  protected name = 'sandbox-fs';
+  protected description = 'Show or configure filesystem sandbox status';
 
   execute(args: string[]): CommandResult {
     const status = Config.sandboxDisabled ? 'DISABLED' : 'ENABLED';
@@ -49,7 +49,7 @@ export class SandboxCommand extends BaseCommand {
         console.log(`${Config.colors.red}Sandbox is already disabled${Config.colors.reset}`);
       }
     } else {
-      console.log(`${Config.colors.red}Invalid argument. Use: /sandbox [on|off]${Config.colors.reset}`);
+      console.log(`${Config.colors.red}Invalid argument. Use: /sandbox-fs [on|off]${Config.colors.reset}`);
     }
 
     return { shouldQuit: false, runApiCall: false };
