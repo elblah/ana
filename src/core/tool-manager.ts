@@ -103,11 +103,12 @@ export class ToolManager {
         description: string,
         parameters: ToolParameters,
         execute: (args: ToolExecutionArgs) => Promise<string>,
-        pluginName: string
+        pluginName: string,
+        auto_approved: boolean = false
     ): void {
         this.tools.set(name, {
             type: 'plugin',
-            auto_approved: false,
+            auto_approved,
             approval_excludes_arguments: false,
             approval_key_exclude_arguments: [],
             hide_results: false,
@@ -131,16 +132,15 @@ export class ToolManager {
         const definitions: ApiRequestData['tools'] = [];
 
         for (const [name, toolDef] of this.tools) {
-            if (toolDef.type === 'internal') {
-                definitions.push({
-                    type: 'function',
-                    function: {
-                        name,
-                        description: toolDef.description,
-                        parameters: toolDef.parameters,
-                    },
-                });
-            }
+            // Include both internal and plugin tools
+            definitions.push({
+                type: 'function',
+                function: {
+                    name,
+                    description: toolDef.description,
+                    parameters: toolDef.parameters,
+                },
+            });
         }
 
         return definitions;
@@ -166,19 +166,28 @@ export class ToolManager {
 
             let argsObj: ToolExecutionArgs;
             try {
-                // Validate JSON before parsing
-                if (!args || args.trim() === '') {
+                // Handle different argument formats
+                if (!args) {
                     argsObj = {};
+                } else if (typeof args === 'string') {
+                    if (args.trim() === '') {
+                        argsObj = {};
+                    } else {
+                        argsObj = JSON.parse(args) as ToolExecutionArgs;
+                    }
+                } else if (typeof args === 'object') {
+                    argsObj = args as ToolExecutionArgs;
                 } else {
-                    argsObj = JSON.parse(args) as ToolExecutionArgs;
+                    throw new Error(`Invalid arguments type: ${typeof args}`);
                 }
             } catch (error) {
                 console.error(
                     `${Config.colors.red}JSON Parse Error - Raw arguments:${Config.colors.reset}`
                 );
                 console.error(`${Config.colors.red}${JSON.stringify(args)}${Config.colors.reset}`);
+                const argsStr = typeof args === 'string' ? args : JSON.stringify(args);
                 throw new Error(
-                    `Invalid JSON in tool arguments: ${error}. Raw arguments: ${args?.substring(0, 200) || 'undefined'}${args && args.length > 200 ? '...' : ''}`
+                    `Invalid JSON in tool arguments: ${error}. Raw arguments: ${argsStr?.substring(0, 200) || 'undefined'}${argsStr && argsStr.length > 200 ? '...' : ''}`
                 );
             }
 
@@ -240,7 +249,13 @@ export class ToolManager {
                         );
                         break;
                     default:
-                        throw new Error(`Internal tool execution not implemented: ${name}`);
+                        // Check if this is a plugin tool
+                        const toolDef = this.tools.get(name);
+                        if (toolDef && toolDef.type === 'plugin' && toolDef.execute) {
+                            toolOutput = await toolDef.execute(argsObj);
+                        } else {
+                            throw new Error(`Internal tool execution not implemented: ${name}`);
+                        }
                 }
             } catch (execError) {
                 throw new Error(
@@ -374,6 +389,10 @@ export class ToolManager {
                     throw new Error('list_directory requires "path" argument (string)');
                 }
                 // Sandbox check is now handled by FileUtils
+                break;
+            default:
+                // For plugin tools, let the plugin handle its own validation
+                // The tool definition should handle validation through JSON schema
                 break;
         }
     }

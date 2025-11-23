@@ -57,6 +57,7 @@ export interface PluginTool {
     description: string;
     parameters: ToolParameters;
     execute(args: ToolExecutionArgs): Promise<string>;
+    auto_approved?: boolean;  // Whether tool is auto-approved (default: false)
 }
 
 /**
@@ -260,6 +261,9 @@ class PluginSystem {
      * Get all tools (internal + plugins)
      */
     getAllTools(): Map<string, PluginTool> {
+        if (Config.debug) {
+            console.log(`[DEBUG] getAllTools() returning ${this.tools.size} tools:`, Array.from(this.tools.keys()));
+        }
         return this.tools;
     }
 

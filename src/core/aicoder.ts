@@ -115,7 +115,8 @@ export class AICoder {
                     tool.description,
                     tool.parameters,
                     tool.execute,
-                    'plugin'
+                    'plugin',
+                    tool.auto_approved || false
                 );
             }
         } catch (error) {
