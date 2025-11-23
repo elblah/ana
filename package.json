@@ -9,12 +9,19 @@
     "build:min": "bun build --target node --minify-whitespace --minify-syntax --minify-identifiers src/index.ts --outdir ./dist",
     "dev": "bun src/index.ts",
     "start": "bun src/index.ts",
-    "test": "bun test.ts"
+    "test": "bun test.ts",
+    "type-check": "bun tsc --noEmit --strict",
+    "format": "bun biome format --write .",
+    "format:check": "bun biome format .",
+    "lint": "bun biome lint .",
+    "lint:fix": "bun biome lint --write .",
+    "check": "bun run type-check && bun run lint:fix && bun run format:check && bun test"
   },
   "bin": {
     "aicoder-mini": "./bin/aicoder-mini"
   },
   "devDependencies": {
+    "@biomejs/biome": "^1.8.3",
     "@types/bun": "^1.3.2",
     "@types/node": "^20.0.0",
     "typescript": "^5.0.0"

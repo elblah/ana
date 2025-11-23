@@ -1,0 +1,116 @@
+{
+    "$schema": "https://biomejs.dev/schemas/1.9.4/schema.json",
+    "vcs": {
+        "enabled": true,
+        "clientKind": "git",
+        "useIgnoreFile": true
+    },
+    "files": {
+        "ignoreUnknown": false,
+        "ignore": ["dist/**", "node_modules/**", "tmp/**", "*.min.js"]
+    },
+    "formatter": {
+        "enabled": true,
+        "formatWithErrors": false,
+        "indentStyle": "space",
+        "indentWidth": 4,
+        "lineWidth": 100,
+        "lineEnding": "lf",
+        "attributePosition": "auto",
+        "ignore": ["*.md", "*.json"],
+        "include": ["src/**/*", "tests/**/*", "plugins/**/*"]
+    },
+    "organizeImports": {
+        "enabled": true
+    },
+    "linter": {
+        "enabled": true,
+        "rules": {
+            "recommended": true,
+            "complexity": {
+                "noExtraBooleanCast": "error",
+                "noMultipleSpacesInRegularExpressionLiterals": "error",
+                "noUselessCatch": "error",
+                "noWith": "error"
+            },
+            "correctness": {
+                "noConstAssign": "error",
+                "noConstantCondition": "error",
+                "noEmptyCharacterClassInRegex": "error",
+                "noEmptyPattern": "error",
+                "noGlobalObjectCalls": "error",
+                "noInvalidConstructorSuper": "error",
+                "noInvalidUseBeforeDeclaration": "error",
+                "noNewSymbol": "error",
+                "noNonoctalDecimalEscape": "error",
+                "noPrecisionLoss": "error",
+                "noSelfAssign": "error",
+                "noSetterReturn": "error",
+                "noUndeclaredVariables": "error",
+                "noUnreachable": "error",
+                "noUnreachableSuper": "error",
+                "noUnnecessaryContinue": "off"
+            },
+            "style": {
+                "noNegationElse": "error",
+                "noUselessElse": "error",
+                "noVar": "error",
+                "useBlockStatements": "off",
+                "useShorthandFunctionType": "off",
+                "useSingleVarDeclarator": "error",
+                "noParameterAssign": "off",
+                "noUnusedTemplateLiteral": "off",
+                "useTemplate": "off"
+            },
+            "suspicious": {
+                "noArrayIndexKey": "error",
+                "noAssignInExpressions": "error",
+                "noCatchAssign": "error",
+                "noCompareNegZero": "error",
+                "noControlCharactersInRegex": "error",
+                "noDebugger": "error",
+                "noDuplicateCase": "error",
+                "noDuplicateClassMembers": "error",
+                "noDuplicateObjectKeys": "error",
+                "noDuplicateParameters": "error",
+                "noEmptyBlockStatements": "off",
+                "noExplicitAny": "error",
+                "noFallthroughSwitchClause": "error",
+                "noFunctionAssign": "error",
+                "noGlobalIsNan": "off",
+                "noGlobalIsFinite": "off",
+                "noImportAssign": "error",
+                "noMisleadingCharacterClass": "error",
+                "noPrototypeBuiltins": "error",
+                "noRedeclare": "error",
+                "noShadowRestrictedNames": "error",
+                "useGetterReturn": "error",
+                "noConfusingVoidType": "off",
+                "useValidTypeof": "error"
+            },
+            "performance": {
+                "noDelete": "off",
+                "noReExportAll": "off"
+            }
+        }
+    },
+    "javascript": {
+        "globals": ["Bun"],
+        "formatter": {
+            "jsxQuoteStyle": "double",
+            "quoteProperties": "asNeeded",
+            "trailingCommas": "es5",
+            "semicolons": "always",
+            "arrowParentheses": "always",
+            "bracketSpacing": true,
+            "bracketSameLine": false,
+            "quoteStyle": "single",
+            "indentWidth": 4
+        }
+    },
+    "json": {
+        "formatter": {
+            "trailingCommas": "none"
+        }
+    }
+}

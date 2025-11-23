@@ -1,10 +1,10 @@
 ## IMPORTANT
+- **ALL IMPORTS MUST be made on the TOP of the file NO EXCEPTION**: **NEVER** import or require in methods
+- **investigate the code before answering the user NEVER GUESS**
 - readability is a MUST (don't overcomplicate)
-- avoid "bun run build" or if necessary set timeout to 180 secs or more
 - avoid else (DO guard clauses)
 - create tests for every feature
-- read the code before guessing
-- this is a RPI3 environment
+- this is a RPI3 environment (think ultra lightweight solutions)
 - no external deps policy
 - be through always do as much as you can to complete the task
 - in case of doubt ask the user before starting coding
@@ -12,7 +12,7 @@
 
 ## Special Instructions
 
-- Always prioritize security and avoid exposing sensitive information
+- Always prioritize security and **NEVER** expose sensitive information
 - When working with filesystem operations, be mindful of sandbox restrictions
 - When creating new files, ensure they follow the project's TypeScript conventions
 

@@ -210,6 +210,9 @@ AI_MODEL="gpt-4"
 MAX_TOKENS=4096               # Maximum context size
 TEMPERATURE=0.7               # AI response randomness
 AUTO_APPROVE=false            # Auto-approve tool executions
+
+# Plugin configuration
+DISABLE_PLUGINS=1             # Disable all plugins from loading
 ```
 
 ## Security

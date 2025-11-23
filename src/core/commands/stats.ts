@@ -1,11 +1,11 @@
-import { BaseCommand, CommandResult } from './base.js';
+import { BaseCommand, type CommandResult } from './base.js';
 
 export class StatsCommand extends BaseCommand {
-  protected name = 'stats';
-  protected description = 'Show session statistics';
+    protected name = 'stats';
+    protected description = 'Show session statistics';
 
-  execute(): CommandResult {
-    this.context.stats.printStats();
-    return { shouldQuit: false, runApiCall: false };
-  }
+    execute(): CommandResult {
+        this.context.stats.printStats();
+        return { shouldQuit: false, runApiCall: false };
+    }
 }

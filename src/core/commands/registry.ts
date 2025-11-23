@@ -1,4 +1,4 @@
-import { BaseCommand, CommandContext, CommandResult } from './base.js';
+import { BaseCommand, type CommandContext, type CommandResult } from './base.js';
 import { HelpCommand } from './help.js';
 import { QuitCommand } from './quit.js';
 import { ClearCommand } from './clear.js';
@@ -17,117 +17,134 @@ import { SnippetsCommand } from './snippets.js';
 import { Config } from '../config.js';
 
 export class CommandRegistry {
-  private commands: Map<string, BaseCommand> = new Map();
-  private aliases: Map<string, string> = new Map();
+    public commands: Map<string, BaseCommand> = new Map();
+    private aliases: Map<string, string> = new Map();
 
-  constructor(context: CommandContext) {
-    // Register all commands
-    const helpCmd = new HelpCommand(context);
-    const quitCmd = new QuitCommand(context);
-    const clearCmd = new ClearCommand(context);
-    const statsCmd = new StatsCommand(context);
-    const resetCmd = new ResetCommand(context);
-    const saveCmd = new SaveCommand(context);
-    const loadCmd = new LoadCommand(context);
-    const compactCmd = new CompactCommand(context);
-    const sandboxCmd = new SandboxCommand(context);
-    const editCmd = new EditCommand(context);
-    const retryCmd = new RetryCommand(context);
-    const memoryCmd = new MemoryCommand(context);
-    const yoloCmd = new YoloCommand(context);
-    const detailCmd = new DetailCommand();
-    const snippetsCmd = new SnippetsCommand(context);
+    constructor(context: CommandContext) {
+        // Register all commands
+        const helpCmd = new HelpCommand(context);
+        const quitCmd = new QuitCommand(context);
+        const clearCmd = new ClearCommand(context);
+        const statsCmd = new StatsCommand(context);
+        const resetCmd = new ResetCommand(context);
+        const saveCmd = new SaveCommand(context);
+        const loadCmd = new LoadCommand(context);
+        const compactCmd = new CompactCommand(context);
+        const sandboxCmd = new SandboxCommand(context);
+        const editCmd = new EditCommand(context);
+        const retryCmd = new RetryCommand(context);
+        const memoryCmd = new MemoryCommand(context);
+        const yoloCmd = new YoloCommand(context);
+        const detailCmd = new DetailCommand(context);
+        const snippetsCmd = new SnippetsCommand(context);
 
-    this.registerCommand(helpCmd);
-    this.registerCommand(quitCmd);
-    this.registerCommand(clearCmd);
-    this.registerCommand(statsCmd);
-    this.registerCommand(resetCmd);
-    this.registerCommand(saveCmd);
-    this.registerCommand(loadCmd);
-    this.registerCommand(compactCmd);
-    this.registerCommand(sandboxCmd);
-    this.registerCommand(editCmd);
-    this.registerCommand(retryCmd);
-    this.registerCommand(memoryCmd);
-    this.registerCommand(snippetsCmd);
-    this.registerCommand(yoloCmd);
-    this.registerCommand(detailCmd);
-  }
-
-  /**
-   * Register a command
-   */
-  private registerCommand(command: BaseCommand) {
-    const name = command.getName();
-    this.commands.set(name, command);
-
-    // Register aliases
-    command.getAliases().forEach(alias => {
-      this.aliases.set(alias, name);
-    });
-  }
-
-  /**
-   * Register a plugin command with a simple handler function
-   */
-  registerPluginCommand(name: string, handler: (args: string[]) => boolean | void, description: string = 'Plugin command'): void {
-    // Strip leading slash if present
-    const cmdName = name.startsWith('/') ? name.slice(1) : name;
-
-    // Create a simple wrapper command
-    const pluginCommand = {
-      getName: () => cmdName,
-      getAliases: () => [] as string[],
-      getDescription: () => description,
-      execute: async (args: string[]): Promise<CommandResult> => {
-        const result = handler(args);
-        return {
-          shouldQuit: false,
-          runApiCall: false,
-          message: typeof result === 'string' ? result : undefined
-        };
-      }
-    };
-
-    this.commands.set(cmdName, pluginCommand);
-  }
-
-  listCommands(): { name: string; description: string }[] {
-    return Array.from(this.commands.values()).map(cmd => ({
-      name: cmd.getName(),
-      description: cmd.getDescription()
-    }));
-  }
-
-  /**
-   * Execute a command by name
-   */
-  async executeCommand(commandLine: string): Promise<CommandResult> {
-    // Split command and arguments
-    const parts = commandLine.trim().split(/\s+/);
-    const commandName = parts[0].toLowerCase();
-    const args = parts.slice(1);
-
-    // Handle alias
-    const actualCommand = this.aliases.get(commandName.startsWith('/') ? commandName.slice(1) : commandName) || commandName;
-
-    // Remove leading slash if present
-    const cmdName = actualCommand.startsWith('/') ? actualCommand.slice(1) : actualCommand;
-
-    // Find and execute command
-    const command = this.commands.get(cmdName);
-    if (!command) {
-      console.log(`${Config.colors.red}Unknown command: ${commandLine}${Config.colors.reset}`);
-      console.log(`Type ${Config.colors.green}/help${Config.colors.reset} to see available commands.`);
-      return { shouldQuit: false, runApiCall: false };
+        this.registerCommand(helpCmd);
+        this.registerCommand(quitCmd);
+        this.registerCommand(clearCmd);
+        this.registerCommand(statsCmd);
+        this.registerCommand(resetCmd);
+        this.registerCommand(saveCmd);
+        this.registerCommand(loadCmd);
+        this.registerCommand(compactCmd);
+        this.registerCommand(sandboxCmd);
+        this.registerCommand(editCmd);
+        this.registerCommand(retryCmd);
+        this.registerCommand(memoryCmd);
+        this.registerCommand(snippetsCmd);
+        this.registerCommand(yoloCmd);
+        this.registerCommand(detailCmd);
     }
 
-    try {
-      return await command.execute(args);
-    } catch (error: any) {
-      console.log(`${Config.colors.red}Error executing command: ${error.message}${Config.colors.reset}`);
-      return { shouldQuit: false, runApiCall: false };
+    /**
+     * Register a command
+     */
+    private registerCommand(command: BaseCommand) {
+        const name = command.getName();
+        this.commands.set(name, command);
+
+        // Register aliases
+        command.getAliases().forEach((alias) => {
+            this.aliases.set(alias, name);
+        });
     }
-  }
+
+    /**
+     * Register a plugin command with a simple handler function
+     */
+    registerPluginCommand(
+        name: string,
+        handler: (args: string[]) => boolean | void,
+        description = 'Plugin command'
+    ): void {
+        // Strip leading slash if present
+        const cmdName = name.startsWith('/') ? name.slice(1) : name;
+
+        // Create a simple wrapper command class
+        class PluginCommand extends BaseCommand {
+            protected name = cmdName;
+            protected description = description;
+
+            execute(args: string[]): Promise<CommandResult> {
+                const result = handler(args);
+                return Promise.resolve({
+                    shouldQuit: false,
+                    runApiCall: false,
+                    message: typeof result === 'string' ? result : undefined,
+                });
+            }
+        }
+
+        // Create a dummy context for plugin commands
+        const dummyContext = {} as CommandContext;
+        const pluginCommand = new PluginCommand(dummyContext);
+
+        this.commands.set(cmdName, pluginCommand);
+    }
+
+    listCommands(): { name: string; description: string }[] {
+        return Array.from(this.commands.values()).map((cmd) => ({
+            name: cmd.getName(),
+            description: cmd.getDescription(),
+        }));
+    }
+
+    /**
+     * Execute a command by name
+     */
+    async executeCommand(commandLine: string): Promise<CommandResult> {
+        // Split command and arguments
+        const parts = commandLine.trim().split(/\s+/);
+        const commandName = parts[0].toLowerCase();
+        const args = parts.slice(1);
+
+        // Handle alias
+        const actualCommand =
+            this.aliases.get(commandName.startsWith('/') ? commandName.slice(1) : commandName) ||
+            commandName;
+
+        // Remove leading slash if present
+        const cmdName = actualCommand.startsWith('/') ? actualCommand.slice(1) : actualCommand;
+
+        // Find and execute command
+        const command = this.commands.get(cmdName);
+        if (!command) {
+            console.log(
+                `${Config.colors.red}Unknown command: ${commandLine}${Config.colors.reset}`
+            );
+            console.log(
+                `Type ${Config.colors.green}/help${Config.colors.reset} to see available commands.`
+            );
+            return { shouldQuit: false, runApiCall: false };
+        }
+
+        try {
+            return await command.execute(args);
+        } catch (error: unknown) {
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            console.log(
+                `${Config.colors.red}Error executing command: ${errorMessage}${Config.colors.reset}`
+            );
+            return { shouldQuit: false, runApiCall: false };
+        }
+    }
 }

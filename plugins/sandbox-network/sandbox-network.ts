@@ -1,11 +1,12 @@
 /**
  * Network Sandbox Plugin for AI Coder (TypeScript/Bun version)
- * 
+ *
  * Provides network sandboxing for shell commands using seccomp C program.
  * Default: disabled (network access allowed)
  */
 
-import type { PluginContext } from '../../src/core/plugin-system.js';
+import type { Plugin, PluginContext } from '../../src/core/plugin-system.js';
+import type { ToolCall } from '../../src/core/streaming-client.js';
 
 // Seccomp C source code (embedded)
 const SECCOMP_SOURCE = `
@@ -86,211 +87,217 @@ int main(int argc, char **argv) {
 }
 `;
 
-export default function createSandboxNetworkPlugin(ctx: PluginContext) {
-  let enabled = false;
-  let compiledExecutable: string | null = null;
-  let compilationInProgress = false;
+// Plugin implementation - using the single API
+export default function createSandboxNetworkPlugin(ctx: PluginContext): Plugin {
+    let enabled = false;
+    let compiledExecutable: string | null = null;
+    let compilationInProgress = false;
 
-  // Check requirements
-  async function checkRequirements(): Promise<{ ok: boolean; missing: string[] }> {
-    const missing: string[] = [];
+    // Check requirements
+    async function checkRequirements(): Promise<{ ok: boolean; missing: string[] }> {
+        const missing: string[] = [];
 
-    // Check for gcc
-    try {
-      const { spawn } = await import('node:child_process');
-      await new Promise<void>((resolve, reject) => {
-        const proc = spawn('gcc', ['--version'], { stdio: 'pipe' });
-        proc.on('close', (code) => code === 0 ? resolve() : reject());
-        proc.on('error', reject);
-      });
-    } catch {
-      missing.push('gcc (install with: apt install build-essential)');
-    }
-
-    // Check for seccomp header
-    try {
-      const fs = await import('node:fs');
-      const path = await import('node:path');
-      const seccompPaths = [
-        '/usr/include/seccomp.h',
-        '/usr/local/include/seccomp.h',
-        '/usr/include/x86_64-linux-gnu/seccomp.h'
-      ];
-      
-      const headerExists = seccompPaths.some(p => fs.existsSync(p));
-      if (!headerExists) {
-        missing.push('libseccomp-dev (install with: apt install libseccomp-dev)');
-      }
-    } catch {
-      missing.push('libseccomp-dev (install with: apt install libseccomp-dev)');
-    }
-
-    return { ok: missing.length === 0, missing };
-  }
-
-  // Compile seccomp binary
-  async function compileExecutable(): Promise<string | null> {
-    if (compiledExecutable) {
-      return compiledExecutable;
-    }
-
-    if (compilationInProgress) {
-      return null;
-    }
-
-    compilationInProgress = true;
-
-    try {
-      const requirements = await checkRequirements();
-      if (!requirements.ok) {
-        console.log('[x] Network sandbox unavailable - missing requirements:');
-        requirements.missing.forEach(req => console.log(`    - ${req}`));
-        return null;
-      }
-
-      const fs = await import('node:fs');
-      const path = await import('node:path');
-      const { spawn } = await import('node:child_process');
-
-      // Write source file
-      const sourceFile = '/tmp/sandbox-network.c';
-      await fs.promises.writeFile(sourceFile, SECCOMP_SOURCE);
-
-      // Compile
-      const executableFile = '/tmp/sandbox-network';
-      const result = await new Promise<{ success: boolean; error?: string }>((resolve) => {
-        const proc = spawn('gcc', [
-          '-o', executableFile,
-          sourceFile,
-          '-lseccomp'
-        ], { stdio: 'pipe' });
-
-        let stderr = '';
-        let stdout = '';
-        proc.stderr?.on('data', (data) => stderr += data.toString());
-        proc.stdout?.on('data', (data) => stdout += data.toString());
-
-        proc.on('close', (code) => {
-          if (code === 0) {
-            resolve({ success: true });
-          } else {
-            resolve({ success: false, error: stderr });
-          }
-        });
-
-        proc.on('error', (error) => {
-          resolve({ success: false, error: error.message });
-        });
-      });
-
-      if (!result.success) {
-        console.log(`[x] Failed to compile network sandbox: ${result.error}`);
-        return null;
-      }
-
-      // Make executable and clean up source
-      await fs.promises.chmod(executableFile, 0o755);
-      await fs.promises.unlink(sourceFile);
-
-      // Verify the binary was created
-      if (!fs.existsSync(executableFile)) {
-        console.log('[x] Compilation succeeded but binary not found');
-        return null;
-      }
-
-      compiledExecutable = executableFile;
-      console.log('[+] Network sandbox compiled successfully');
-      return executableFile;
-
-    } catch (error) {
-      console.log(`[x] Compilation failed: ${error}`);
-      return null;
-    } finally {
-      compilationInProgress = false;
-    }
-  }
-
-  // Get access to the app context to modify tool execution
-  setTimeout(() => {
-    if (ctx.app?.toolManager) {
-      const toolManager = ctx.app.toolManager;
-      const originalExecuteToolCall = toolManager.executeToolCall.bind(toolManager);
-      
-      // Override the executeToolCall method to intercept shell commands
-      toolManager.executeToolCall = async (toolCall: any) => {
-        if (toolCall.function?.name === 'run_shell_command' && enabled) {
-          const args = JSON.parse(toolCall.function.arguments || '{}');
-          const originalCommand = args.command;
-          const executablePath = '/tmp/sandbox-network';
-          
-          // Ensure binary is compiled
-          if (!compiledExecutable) {
-            console.log('[*] Compiling network sandbox...');
-            await compileExecutable();
-          }
-          
-          const fs = require('fs');
-          if (fs.existsSync(executablePath)) {
-            const wrappedCommand = `${executablePath} sh -c "${originalCommand}"`;
-            console.log(`[*] Network sandbox active: ${originalCommand}`);
-            
-            // Execute with sandbox wrapper
-            const modifiedToolCall = {
-              ...toolCall,
-              function: {
-                ...toolCall.function,
-                arguments: JSON.stringify({
-                  ...args,
-                  command: wrappedCommand
-                })
-              }
-            };
-            
-            return await originalExecuteToolCall(modifiedToolCall);
-          } else {
-            console.log('[!] Network sandbox executable not found, running without protection');
-          }
+        // Check for gcc
+        try {
+            const { spawn } = await import('node:child_process');
+            await new Promise<void>((resolve, reject) => {
+                const proc = spawn('gcc', ['--version'], { stdio: 'pipe' });
+                proc.on('close', (code) => (code === 0 ? resolve() : reject()));
+                proc.on('error', reject);
+            });
+        } catch {
+            missing.push('gcc (install with: apt install build-essential)');
         }
-        
-        // Fall back to normal execution
-        return await originalExecuteToolCall(toolCall);
-      };
-      
-      // Hook installed silently
+
+        // Check for seccomp header
+        try {
+            const fs = await import('node:fs');
+            const path = await import('node:path');
+            const seccompPaths = [
+                '/usr/include/seccomp.h',
+                '/usr/local/include/seccomp.h',
+                '/usr/include/x86_64-linux-gnu/seccomp.h',
+            ];
+
+            const headerExists = seccompPaths.some((p) => fs.existsSync(p));
+            if (!headerExists) {
+                missing.push('libseccomp-dev (install with: apt install libseccomp-dev)');
+            }
+        } catch {
+            missing.push('libseccomp-dev (install with: apt install libseccomp-dev)');
+        }
+
+        return { ok: missing.length === 0, missing };
     }
-  }, 100);
 
-  // Command handler
-  function handleSandboxCommand(commandArgs: string[]): boolean | void {
-    if (!commandArgs.length) {
-      const status = enabled ? 'enabled' : 'disabled';
-      console.log(`Network sandbox: ${status}`);
-      return;
+    // Compile seccomp binary
+    async function compileExecutable(): Promise<string | null> {
+        if (compiledExecutable) {
+            return compiledExecutable;
+        }
+
+        if (compilationInProgress) {
+            return null;
+        }
+
+        compilationInProgress = true;
+
+        try {
+            const requirements = await checkRequirements();
+            if (!requirements.ok) {
+                console.log('[x] Network sandbox unavailable - missing requirements:');
+                for (const req of requirements.missing) {
+                    console.log(`    - ${req}`);
+                }
+                return null;
+            }
+
+            const fs = await import('node:fs');
+            const path = await import('node:path');
+            const { spawn } = await import('node:child_process');
+
+            // Write source file
+            const sourceFile = '/tmp/sandbox-network.c';
+            await fs.promises.writeFile(sourceFile, SECCOMP_SOURCE);
+
+            // Compile
+            const executableFile = '/tmp/sandbox-network';
+            const result = await new Promise<{ success: boolean; error?: string }>((resolve) => {
+                const proc = spawn('gcc', ['-o', executableFile, sourceFile, '-lseccomp'], {
+                    stdio: 'pipe',
+                });
+
+                let stderr = '';
+                let stdout = '';
+                proc.stderr?.on('data', (data) => {
+                    stderr += data.toString();
+                });
+                proc.stdout?.on('data', (data) => {
+                    stdout += data.toString();
+                });
+
+                proc.on('close', (code) => {
+                    if (code === 0) {
+                        resolve({ success: true });
+                    } else {
+                        resolve({ success: false, error: stderr });
+                    }
+                });
+
+                proc.on('error', (error) => {
+                    resolve({ success: false, error: error.message });
+                });
+            });
+
+            if (!result.success) {
+                console.log(`[x] Failed to compile network sandbox: ${result.error}`);
+                return null;
+            }
+
+            // Make executable and clean up source
+            await fs.promises.chmod(executableFile, 0o755);
+            await fs.promises.unlink(sourceFile);
+
+            // Verify the binary was created
+            if (!fs.existsSync(executableFile)) {
+                console.log('[x] Compilation succeeded but binary not found');
+                return null;
+            }
+
+            compiledExecutable = executableFile;
+            console.log('[+] Network sandbox compiled successfully');
+            return executableFile;
+        } catch (error) {
+            console.log(`[x] Compilation failed: ${error}`);
+            return null;
+        } finally {
+            compilationInProgress = false;
+        }
     }
 
-    const cmd = commandArgs[0].toLowerCase();
+    // Get access to the app context to modify tool execution
+    setTimeout(() => {
+        if (ctx.app?.toolManager) {
+            const toolManager = ctx.app.toolManager;
+            const originalExecuteToolCall = toolManager.executeToolCall.bind(toolManager);
 
-    switch (cmd) {
-      case 'on':
-        enabled = true;
-        console.log('[+] Network sandbox enabled');
-        console.log('    [INFO] Seccomp binary will be compiled on first shell command');
-        ctx.setConfig('sandbox_network.enabled', true);
-        break;
+            // Override the executeToolCall method to intercept shell commands
+            toolManager.executeToolCall = (async (toolCall: ToolCall) => {
+                if (toolCall.function?.name === 'run_shell_command' && enabled) {
+                    const args = JSON.parse(toolCall.function.arguments || '{}');
+                    const originalCommand = args.command;
+                    const executablePath = '/tmp/sandbox-network';
 
-      case 'off':
-        enabled = false;
-        console.log('[-] Network sandbox disabled');
-        ctx.setConfig('sandbox_network.enabled', false);
-        break;
+                    // Ensure binary is compiled
+                    if (!compiledExecutable) {
+                        console.log('[*] Compiling network sandbox...');
+                        await compileExecutable();
+                    }
 
-      case 'status':
-        const status = enabled ? 'enabled' : 'disabled';
-        console.log(`Network sandbox: ${status}`);
-        break;
+                    const fs = require('node:fs');
+                    if (fs.existsSync(executablePath)) {
+                        const wrappedCommand = `${executablePath} sh -c "${originalCommand}"`;
+                        console.log(`[*] Network sandbox active: ${originalCommand}`);
 
-      case 'help':
-        console.log(`Network sandbox command usage:
+                        // Execute with sandbox wrapper
+                        const modifiedToolCall = {
+                            ...toolCall,
+                            function: {
+                                ...toolCall.function,
+                                arguments: JSON.stringify({
+                                    ...args,
+                                    command: wrappedCommand,
+                                }),
+                            },
+                        };
+
+                        return await originalExecuteToolCall(modifiedToolCall);
+                    }
+                    console.log(
+                        '[!] Network sandbox executable not found, running without protection'
+                    );
+                }
+
+                // Fall back to normal execution
+                return await originalExecuteToolCall(toolCall);
+            }).bind(toolManager);
+
+            // Hook installed silently
+        }
+    }, 100);
+
+    // Command handler
+    function handleSandboxCommand(commandArgs: string[]): boolean | undefined {
+        if (!commandArgs.length) {
+            const status = enabled ? 'enabled' : 'disabled';
+            console.log(`Network sandbox: ${status}`);
+            return;
+        }
+
+        const cmd = commandArgs[0].toLowerCase();
+
+        switch (cmd) {
+            case 'on':
+                enabled = true;
+                console.log('[+] Network sandbox enabled');
+                console.log('    [INFO] Seccomp binary will be compiled on first shell command');
+                ctx.setConfig('sandbox_network.enabled', true);
+                break;
+
+            case 'off':
+                enabled = false;
+                console.log('[-] Network sandbox disabled');
+                ctx.setConfig('sandbox_network.enabled', false);
+                break;
+
+            case 'status': {
+                const status = enabled ? 'enabled' : 'disabled';
+                console.log(`Network sandbox: ${status}`);
+                break;
+            }
+
+            case 'help':
+                console.log(`Network sandbox command usage:
   /sandbox-net               - Show current status
   /sandbox-net on            - Enable network sandbox
   /sandbox-net off           - Disable network sandbox
@@ -306,38 +313,44 @@ Default: sandbox disabled (network access allowed)
 Requirements:
   - libseccomp-dev (install with: apt install libseccomp-dev)
   - gcc (install with: apt install build-essential)`);
-        break;
+                break;
 
-      default:
-        console.log(`Unknown option: ${cmd}. Use '/sandbox-network help' for commands.`);
+            default:
+                console.log(`Unknown option: ${cmd}. Use '/sandbox-network help' for commands.`);
+        }
     }
-  }
 
-  // Register commands
-  ctx.registerCommand('/sandbox-net', handleSandboxCommand, 'Control network sandbox for shell commands');
-  ctx.registerCommand('/snet', handleSandboxCommand, 'Alias for sandbox-net');
+    // Register commands
+    ctx.registerCommand(
+        '/sandbox-net',
+        handleSandboxCommand,
+        'Control network sandbox for shell commands'
+    );
+    ctx.registerCommand('/snet', handleSandboxCommand, 'Alias for sandbox-net');
 
-  // Load saved state
-  const savedEnabled = ctx.getConfig('sandbox_network.enabled');
-  if (typeof savedEnabled === 'boolean') {
-    enabled = savedEnabled;
-  }
-
-  // Check requirements on startup
-  checkRequirements().then(reqs => {
-    if (!reqs.ok) {
-      console.log('[!] Network sandbox - missing requirements:');
-      reqs.missing.forEach(req => console.log(`        - ${req}`));
+    // Load saved state
+    const savedEnabled = ctx.getConfig('sandbox_network.enabled');
+    if (typeof savedEnabled === 'boolean') {
+        enabled = savedEnabled;
     }
-    // Only show success message if requirements missing was an issue
-  });
 
-  console.log('[+] Network sandbox plugin initialized');
-  console.log('    Use /sandbox-network on|off to control');
+    // Check requirements on startup
+    checkRequirements().then((reqs) => {
+        if (!reqs.ok) {
+            console.log('[!] Network sandbox - missing requirements:');
+            for (const req of reqs.missing) {
+                console.log(`        - ${req}`);
+            }
+        }
+        // Only show success message if requirements missing was an issue
+    });
 
-  return {
-    name: 'Network Sandbox Plugin',
-    version: '1.0.0',
-    description: 'Network sandboxing for shell commands using seccomp'
-  };
+    console.log('[+] Network sandbox plugin initialized');
+    console.log('    Use /sandbox-network on|off to control');
+
+    return {
+        name: 'Network Sandbox Plugin',
+        version: '1.0.0',
+        description: 'Network sandboxing for shell commands using seccomp',
+    };
 }
