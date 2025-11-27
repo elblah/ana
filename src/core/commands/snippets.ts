@@ -1,6 +1,7 @@
 import { BaseCommand, type CommandResult } from './base.js';
 import { getSnippetNames, loadSnippet, ensureSnippetsDir, SNIPPETS_DIR } from '../snippet-utils.js';
 import { Config } from '../config.js';
+import { LogUtils } from '../../utils/log-utils.js';
 
 export class SnippetsCommand extends BaseCommand {
     protected name = 'snippets';
@@ -22,40 +23,32 @@ export class SnippetsCommand extends BaseCommand {
             case 'path':
                 return this.showPath();
             default:
-                console.log(
-                    `${Config.colors.red}[!] Unknown subcommand: ${subcommand}${Config.colors.reset}`
-                );
+                LogUtils.error(`[!] Unknown subcommand: ${subcommand}`);
                 this.showUsage();
                 return { shouldQuit: false, runApiCall: false };
         }
     }
 
     private showUsage(): void {
-        console.log(`${Config.colors.cyan}Usage: /snippets <command>${Config.colors.reset}`);
-        console.log(`${Config.colors.cyan}Commands:${Config.colors.reset}`);
-        console.log(
-            `  ${Config.colors.green}list${Config.colors.reset}    - List all available snippets`
-        );
-        console.log(
-            `  ${Config.colors.green}show${Config.colors.reset}    <name> - Show snippet content`
-        );
-        console.log(
-            `  ${Config.colors.green}path${Config.colors.reset}    - Show snippets directory path`
-        );
+        LogUtils.print('Usage: /snippets <command>', { color: Config.colors.cyan });
+        LogUtils.print('Commands:', { color: Config.colors.cyan });
+        LogUtils.print('  list    - List all available snippets', { color: Config.colors.green });
+        LogUtils.print('  show    <name> - Show snippet content', { color: Config.colors.green });
+        LogUtils.print('  path    - Show snippets directory path', { color: Config.colors.green });
     }
 
     private listSnippets(): CommandResult {
         const names = getSnippetNames();
 
         if (names.length === 0) {
-            console.log(`${Config.colors.yellow}[!] No snippets found${Config.colors.reset}`);
-            console.log(
-                `${Config.colors.dim}Create .txt files in ~/.config/aicoder-mini/snippets/${Config.colors.reset}`
-            );
+            LogUtils.warn('[!] No snippets found');
+            LogUtils.print('Create .txt files in ~/.config/aicoder-mini/snippets/', {
+                color: Config.colors.dim,
+            });
         } else {
-            console.log(`${Config.colors.cyan}Available snippets:${Config.colors.reset}`);
+            LogUtils.print('Available snippets:', { color: Config.colors.cyan });
             names.forEach((name) => {
-                console.log(`  ${Config.colors.green}${name}${Config.colors.reset}`);
+                LogUtils.print(`  ${name}`, { color: Config.colors.green });
             });
         }
 
@@ -64,19 +57,17 @@ export class SnippetsCommand extends BaseCommand {
 
     private showSnippet(name: string): CommandResult {
         if (!name) {
-            console.log(`${Config.colors.red}[!] Missing snippet name${Config.colors.reset}`);
-            console.log(`${Config.colors.cyan}Usage: /snippets show <name>${Config.colors.reset}`);
+            LogUtils.error('[!] Missing snippet name');
+            LogUtils.print('Usage: /snippets show <name>', { color: Config.colors.cyan });
             return { shouldQuit: false, runApiCall: false };
         }
 
         const content = loadSnippet(name);
         if (content !== null) {
-            console.log(`${Config.colors.cyan}Snippet '@${name}':${Config.colors.reset}`);
-            console.log(`${Config.colors.dim}${content}${Config.colors.reset}`);
+            LogUtils.print(`Snippet '@${name}':`, { color: Config.colors.cyan });
+            LogUtils.print(content, { color: Config.colors.dim });
         } else {
-            console.log(
-                `${Config.colors.red}[!] Snippet '${name}' not found${Config.colors.reset}`
-            );
+            LogUtils.error(`[!] Snippet '${name}' not found`);
         }
 
         return { shouldQuit: false, runApiCall: false };
@@ -84,8 +75,8 @@ export class SnippetsCommand extends BaseCommand {
 
     private showPath(): CommandResult {
         ensureSnippetsDir();
-        console.log(`${Config.colors.cyan}Snippets directory:${Config.colors.reset}`);
-        console.log(`  ${Config.colors.green}${SNIPPETS_DIR}${Config.colors.reset}`);
+        LogUtils.print('Snippets directory:', { color: Config.colors.cyan });
+        LogUtils.print(`  ${SNIPPETS_DIR}`, { color: Config.colors.green });
         return { shouldQuit: false, runApiCall: false };
     }
 }

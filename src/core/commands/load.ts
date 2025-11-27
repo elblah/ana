@@ -1,5 +1,8 @@
 import { BaseCommand, type CommandResult, CommandContext } from './base.js';
 import { Config } from '../config.js';
+import { FileUtils } from '../../utils/file-utils.js';
+import { LogUtils } from '../../utils/log-utils.js';
+import { JsonUtils } from '../../utils/json-utils.js';
 
 export class LoadCommand extends BaseCommand {
     protected name = 'load';
@@ -9,33 +12,24 @@ export class LoadCommand extends BaseCommand {
         const filename = args[0] || 'session.json';
 
         try {
-            const file = Bun.file(filename);
-            if (!file.exists()) {
-                console.log(
-                    `${Config.colors.red}Session file not found: ${filename}${Config.colors.reset}`
-                );
+            if (!(await FileUtils.fileExistsAsync(filename))) {
+                LogUtils.error(`Session file not found: ${filename}`);
                 return { shouldQuit: false, runApiCall: false };
             }
 
-            const sessionData = JSON.parse(await file.text());
+            const sessionData = await JsonUtils.readFile(filename);
 
             // Handle both formats: direct array of messages or object with messages property
             const messages = Array.isArray(sessionData) ? sessionData : sessionData.messages;
 
             if (messages && Array.isArray(messages)) {
                 this.context.messageHistory.setMessages(messages);
-                console.log(
-                    `${Config.colors.green}Session loaded from ${filename}${Config.colors.reset}`
-                );
+                LogUtils.success(`Session loaded from ${filename}`);
             } else {
-                console.log(
-                    `${Config.colors.red}Invalid session file format${Config.colors.reset}`
-                );
+                LogUtils.error(`Invalid session file format`);
             }
         } catch (error) {
-            console.log(
-                `${Config.colors.red}Error loading session: ${error}${Config.colors.reset}`
-            );
+            LogUtils.error(`Error loading session: ${error}`);
         }
 
         return { shouldQuit: false, runApiCall: false };

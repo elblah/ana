@@ -4,7 +4,8 @@
 
 import type { Stats } from './stats.js';
 import { Config } from './config.js';
-import { FileUtils } from './file-utils.js';
+import { FileUtils } from '../utils/file-utils.js';
+import { LogUtils } from '../utils/log-utils.js';
 import { ToolFormatter, type ToolOutput, type ToolPreview } from './tool-formatter.js';
 import {
     type ToolCall,
@@ -14,32 +15,23 @@ import {
     ValidationResult,
 } from './types.js';
 import {
-    executeReadFile,
     TOOL_DEFINITION as READ_FILE_DEF,
     type ReadFileParams,
 } from '../tools/internal/read-file.js';
 import {
-    executeWriteFile,
     TOOL_DEFINITION as WRITE_FILE_DEF,
     type WriteFileParams,
 } from '../tools/internal/write-file.js';
+import { TOOL_DEFINITION as EDIT_FILE_DEF } from '../tools/internal/edit-file.js';
 import {
-    executeEditFile,
-    TOOL_DEFINITION as EDIT_FILE_DEF,
-    validate_edit_file,
-} from '../tools/internal/edit-file.js';
-import {
-    executeRunShellCommand,
     TOOL_DEFINITION as RUN_SHELL_COMMAND_DEF,
     type RunShellCommandParams,
 } from '../tools/internal/run-shell-command.js';
 import {
-    executeGrep,
     TOOL_DEFINITION as GREP_DEF,
     type GrepParams,
 } from '../tools/internal/grep.js';
 import {
-    executeListDirectory,
     TOOL_DEFINITION as LIST_DIRECTORY_DEF,
     type ListDirectoryParams,
 } from '../tools/internal/list-directory.js';
@@ -54,9 +46,10 @@ export interface ToolDefinition {
     description: string;
     parameters: ToolParameters;
     pluginName?: string;
-    execute?: (args: ToolExecutionArgs) => Promise<string>;
+    execute?: (args: ToolExecutionArgs) => Promise<ToolOutput>;
     formatArguments?: (args: ToolExecutionArgs) => string | undefined;
     generatePreview?: (args: ToolExecutionArgs) => Promise<ToolPreview | null> | undefined;
+    validateArguments?: (args: ToolExecutionArgs) => void | Promise<void>;
 }
 
 export interface ToolResult {
@@ -88,11 +81,7 @@ export class ToolManager {
         this.tools.set('grep', GREP_DEF);
         this.tools.set('list_directory', LIST_DIRECTORY_DEF);
 
-        if (Config.debug) {
-            console.log(
-                `${Config.colors.green}*** Registered ${this.tools.size} internal tools${Config.colors.reset}`
-            );
-        }
+        LogUtils.debug(`*** Registered ${this.tools.size} internal tools`, Config.colors.green);
     }
 
     /**
@@ -102,7 +91,7 @@ export class ToolManager {
         name: string,
         description: string,
         parameters: ToolParameters,
-        execute: (args: ToolExecutionArgs) => Promise<string>,
+        execute: (args: ToolExecutionArgs) => Promise<ToolOutput>,
         pluginName: string,
         auto_approved: boolean = false
     ): void {
@@ -118,11 +107,10 @@ export class ToolManager {
             execute,
         });
 
-        if (Config.debug) {
-            console.log(
-                `${Config.colors.green}*** Registered plugin tool: ${name} from ${pluginName}${Config.colors.reset}`
-            );
-        }
+        LogUtils.debug(
+            `*** Registered plugin tool: ${name} from ${pluginName}`,
+            Config.colors.green
+        );
     }
 
     /**
@@ -181,10 +169,7 @@ export class ToolManager {
                     throw new Error(`Invalid arguments type: ${typeof args}`);
                 }
             } catch (error) {
-                console.error(
-                    `${Config.colors.red}JSON Parse Error - Raw arguments:${Config.colors.reset}`
-                );
-                console.error(`${Config.colors.red}${JSON.stringify(args)}${Config.colors.reset}`);
+                LogUtils.error(`JSON Parse Error - Raw arguments: ${JSON.stringify(args)}`);
                 const argsStr = typeof args === 'string' ? args : JSON.stringify(args);
                 throw new Error(
                     `Invalid JSON in tool arguments: ${error}. Raw arguments: ${argsStr?.substring(0, 200) || 'undefined'}${argsStr && argsStr.length > 200 ? '...' : ''}`
@@ -202,60 +187,21 @@ export class ToolManager {
             }
 
             // Validate required arguments for each tool
-            this.validateToolArguments(name!, argsObj);
+            await this.validateToolArguments(name!, argsObj);
 
-            // Execute the appropriate internal tool or plugin tool
+            // Execute the appropriate tool using dynamic execution
             let toolOutput: ToolOutput;
             try {
-                switch (name) {
-                    case 'read_file':
-                        toolOutput = await executeReadFile(
-                            argsObj as unknown as ReadFileParams,
-                            this.stats
-                        );
-                        // Track that we read this file
-                        if (argsObj.path && typeof argsObj.path === 'string') {
-                            this.readFiles.add(argsObj.path);
-                        }
-                        break;
-                    case 'write_file':
-                        toolOutput = await executeWriteFile(
-                            argsObj as unknown as WriteFileParams,
-                            this.stats
-                        );
-                        break;
-                    case 'edit_file':
-                        toolOutput = await executeEditFile(
-                            argsObj as { path: string; old_string: string; new_string: string },
-                            this.stats
-                        );
-                        break;
-                    case 'run_shell_command':
-                        toolOutput = await executeRunShellCommand(
-                            argsObj as unknown as RunShellCommandParams,
-                            this.stats
-                        );
-                        break;
-                    case 'grep':
-                        toolOutput = await executeGrep(
-                            argsObj as unknown as GrepParams,
-                            this.stats
-                        );
-                        break;
-                    case 'list_directory':
-                        toolOutput = await executeListDirectory(
-                            argsObj as ListDirectoryParams,
-                            this.stats
-                        );
-                        break;
-                    default:
-                        // Check if this is a plugin tool
-                        const toolDef = this.tools.get(name);
-                        if (toolDef && toolDef.type === 'plugin' && toolDef.execute) {
-                            toolOutput = await toolDef.execute(argsObj);
-                        } else {
-                            throw new Error(`Internal tool execution not implemented: ${name}`);
-                        }
+                const toolDef = this.tools.get(name);
+                if (!toolDef || !toolDef.execute) {
+                    throw new Error(`Tool ${name} not found or has no execute method`);
+                }
+
+                toolOutput = await toolDef.execute(argsObj);
+
+                // Track that we read this file (special case for read_file)
+                if (name === 'read_file' && argsObj.path && typeof argsObj.path === 'string') {
+                    this.readFiles.add(argsObj.path);
                 }
             } catch (execError) {
                 throw new Error(
@@ -312,7 +258,6 @@ export class ToolManager {
                 friendly: friendlyResult || undefined,
             };
         } catch (error) {
-            this.stats.incrementToolErrors();
             return {
                 tool_call_id: id,
                 content: `Error executing ${name}: ${error instanceof Error ? error.message : String(error)}`,
@@ -343,57 +288,12 @@ export class ToolManager {
     }
 
     /**
-     * Validate tool arguments
+     * Validate tool arguments - each tool handles its own validation internally
      */
-    private validateToolArguments(toolName: string, args: ToolExecutionArgs): void {
-        switch (toolName) {
-            case 'read_file':
-                if (!args.path || typeof args.path !== 'string') {
-                    throw new Error('read_file requires "path" argument (string)');
-                }
-                if (!this.checkSandbox(toolName, args.path)) {
-                    throw new Error('read_file: path outside current directory not allowed');
-                }
-                break;
-            case 'write_file':
-                if (!args.path || typeof args.path !== 'string') {
-                    throw new Error('write_file requires "path" argument (string)');
-                }
-                if (args.content === undefined) {
-                    throw new Error('write_file requires "content" argument');
-                }
-                if (!this.checkSandbox(toolName, args.path)) {
-                    throw new Error('write_file: path outside current directory not allowed');
-                }
-
-                // Safety: Check if file exists and wasn't read first
-                if (this.fileExists(args.path) && !this.wasFileRead(args.path)) {
-                    throw new Error(
-                        `write_file: File "${args.path}" exists but wasn't read first. Read it first to avoid accidental overwrites.`
-                    );
-                }
-                break;
-            case 'run_shell_command':
-                if (!args.command || typeof args.command !== 'string') {
-                    throw new Error('run_shell_command requires "command" argument (string)');
-                }
-                break;
-            case 'grep':
-                if (!args.text || typeof args.text !== 'string') {
-                    throw new Error('grep requires "text" argument (string)');
-                }
-                // Sandbox check is now handled by FileUtils
-                break;
-            case 'list_directory':
-                if (!args.path || typeof args.path !== 'string') {
-                    throw new Error('list_directory requires "path" argument (string)');
-                }
-                // Sandbox check is now handled by FileUtils
-                break;
-            default:
-                // For plugin tools, let the plugin handle its own validation
-                // The tool definition should handle validation through JSON schema
-                break;
+    private async validateToolArguments(toolName: string, args: ToolExecutionArgs): Promise<void> {
+        const toolDef = this.tools.get(toolName);
+        if (toolDef?.validateArguments) {
+            await toolDef.validateArguments(args);
         }
     }
 
@@ -402,9 +302,9 @@ export class ToolManager {
      */
     private checkSandbox(toolName: string, path: string): boolean {
         if (Config.sandboxDisabled) {
-            console.log(
-                `${Config.colors.cyan}[!] Sandbox-fs disabled - allowing all paths${Config.colors.reset}`
-            );
+            LogUtils.print('[!] Sandbox-fs disabled - allowing all paths', {
+                color: Config.colors.cyan,
+            });
             return true;
         }
 
@@ -412,8 +312,8 @@ export class ToolManager {
 
         // Block parent directory traversal
         if (path.includes('../')) {
-            console.log(
-                `${Config.colors.yellow}[x] Sandbox-fs: ${toolName} trying to access "${path}" outside current directory${Config.colors.reset}`
+            LogUtils.warn(
+                `[x] Sandbox-fs: ${toolName} trying to access "${path}" outside current directory`
             );
             return false;
         }
@@ -421,8 +321,8 @@ export class ToolManager {
         // For absolute paths, check if they're within current directory
         if (path.startsWith('/')) {
             if (!path.startsWith(this.currentDir)) {
-                console.log(
-                    `${Config.colors.yellow}[x] Sandbox-fs: ${toolName} trying to access "${path}" outside current directory${Config.colors.reset}`
+                LogUtils.warn(
+                    `[x] Sandbox-fs: ${toolName} trying to access "${path}" outside current directory`
                 );
                 return false;
             }
@@ -466,8 +366,8 @@ export class ToolManager {
             } catch (error) {
                 // Fallback to JSON if formatter fails
                 if (Config.debug) {
-                    console.log(
-                        `${Config.colors.yellow}[!] Custom formatter failed for ${toolName}, falling back to JSON${Config.colors.reset}`
+                    LogUtils.warn(
+                        `[!] Custom formatter failed for ${toolName}, falling back to JSON`
                     );
                 }
             }
@@ -501,9 +401,7 @@ export class ToolManager {
             const preview = await toolDef.generatePreview(args);
             return preview || null;
         } catch (error) {
-            console.error(
-                `${Config.colors.red}[!] Preview generation failed for ${toolName}: ${error}${Config.colors.reset}`
-            );
+            LogUtils.error(`[!] Preview generation failed for ${toolName}: ${error}`);
             return null;
         }
     }

@@ -19,16 +19,18 @@ describe('Auto-Compaction During Processing', () => {
         // Set low threshold for testing using environment variables
         process.env.CONTEXT_SIZE = '1000';
         process.env.CONTEXT_COMPACT_PERCENTAGE = '80'; // 80% of context size = 800
-        
+
         stats = new Stats();
         messageHistory = new MessageHistory(stats);
-        
+
         // Create mock API client that doesn't make real API calls
         mockApiClient = {
             async *streamRequest() {
                 // Simulate API failure for compaction tests (expected behavior)
-                throw new Error('All API attempts failed. Last error: Mock API not available in test');
-            }
+                throw new Error(
+                    'All API attempts failed. Last error: Mock API not available in test'
+                );
+            },
         } as any;
         messageHistory.setApiClient(mockApiClient);
 
@@ -45,16 +47,20 @@ describe('Auto-Compaction During Processing', () => {
     it('should trigger compaction before AI request when threshold exceeded', async () => {
         // Add enough messages to exceed threshold
         for (let i = 0; i < 50; i++) {
-            messageHistory.addUserMessage(`User message ${i} with lots of content to increase token count and trigger compaction threshold for testing purposes.`);
+            messageHistory.addUserMessage(
+                `User message ${i} with lots of content to increase token count and trigger compaction threshold for testing purposes.`
+            );
             messageHistory.addAssistantMessage({
-                content: `Assistant response ${i} with detailed explanation that adds more tokens to the conversation context.`
+                content: `Assistant response ${i} with detailed explanation that adds more tokens to the conversation context.`,
             });
-            
+
             // Add some tool results
-            messageHistory.addToolResults([{
-                tool_call_id: `tool_${i}`,
-                content: `Tool result ${i} with substantial output that consumes significant context space and memory during the AI processing phase.`
-            }]);
+            messageHistory.addToolResults([
+                {
+                    tool_call_id: `tool_${i}`,
+                    content: `Tool result ${i} with substantial output that consumes significant context space and memory during the AI processing phase.`,
+                },
+            ]);
         }
 
         // Should trigger compaction
@@ -70,7 +76,7 @@ describe('Auto-Compaction During Processing', () => {
         // Add few messages
         messageHistory.addUserMessage('Short message');
         messageHistory.addAssistantMessage({
-            content: 'Short response'
+            content: 'Short response',
         });
 
         // Should not trigger compaction
@@ -82,7 +88,7 @@ describe('Auto-Compaction During Processing', () => {
         for (let i = 0; i < 30; i++) {
             messageHistory.addUserMessage(`Message ${i}`);
             messageHistory.addAssistantMessage({
-                content: `Response ${i}`
+                content: `Response ${i}`,
             });
         }
 
@@ -92,7 +98,7 @@ describe('Auto-Compaction During Processing', () => {
         const messageCount = messageHistory.getMessages().length;
         expect(messageCount).toBeGreaterThan(0);
         expect(messageHistory.getMessages()[0].role).toBe('system'); // System message should be preserved
-        
+
         // Note: We don't test actual concurrent compaction since it would require
         // real API calls or more complex mocking. The concurrency logic is tested
         // by the fact that shouldAutoCompact() works correctly.

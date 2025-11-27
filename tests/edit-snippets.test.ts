@@ -21,13 +21,13 @@ describe('Edit Command with Snippets', () => {
     beforeEach(async () => {
         // Create a temporary directory for test snippets
         tempSnippetDir = fs.mkdtempSync(path.join(os.tmpdir(), 'aicoder-test-snippets-'));
-        
+
         // Mock the SNIPPETS_DIR to use our temp directory
         const originalSnippetDir = SNIPPETS_DIR;
-        
+
         // Create a test snippet
         fs.writeFileSync(path.join(tempSnippetDir, 'test.txt'), 'Hello from snippet!', 'utf8');
-        
+
         // Create mock objects
         mockMessageHistory = {
             addUserMessage: (message: string) => {
@@ -67,7 +67,7 @@ describe('Edit Command with Snippets', () => {
             setLastUserPrompt: () => {},
             printStats: () => {},
             reset: () => {},
-            // Add other required methods as no-ops  
+            // Add other required methods as no-ops
             startTime: Date.now(),
             endTime: 0,
             lastPrompt: '',
@@ -108,17 +108,17 @@ describe('Edit Command with Snippets', () => {
     it('should handle edit command message with snippets', async () => {
         // Test the concept by verifying the expandSnippets function works
         const { expandSnippets } = require('../src/core/snippet-utils.js');
-        
+
         // Test with non-existent snippets (which is what we can safely test in read-only env)
         const messageWithSnippet = 'This is a test with @@nonexistent snippet';
         const expanded = expandSnippets(messageWithSnippet);
-        
+
         // Should preserve the snippet syntax when snippet is missing
         expect(expanded).toBe(messageWithSnippet);
-        
+
         // Test that expandSnippets function exists and works
         expect(typeof expandSnippets).toBe('function');
-        
+
         // Test empty message
         const emptyMessage = '';
         const expandedEmpty = expandSnippets(emptyMessage);
@@ -127,19 +127,19 @@ describe('Edit Command with Snippets', () => {
 
     it('should preserve original message when no snippets present', async () => {
         const { expandSnippets } = require('../src/core/snippet-utils.js');
-        
+
         const messageWithoutSnippet = 'This is a regular message';
         const expanded = expandSnippets(messageWithoutSnippet);
-        
+
         expect(expanded).toBe(messageWithoutSnippet);
     });
 
     it('should handle missing snippets gracefully', async () => {
         const { expandSnippets } = require('../src/core/snippet-utils.js');
-        
+
         const messageWithMissingSnippet = 'This has @@nonexistent snippet';
         const expanded = expandSnippets(messageWithMissingSnippet);
-        
+
         // Should preserve the original snippet syntax when snippet is missing
         expect(expanded).toBe('This has @@nonexistent snippet');
     });

@@ -3,7 +3,7 @@ import { Config } from '../config.js';
 import { writeFileSync, readFileSync, unlinkSync, existsSync } from 'node:fs';
 import { exec } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { TempUtils } from '../temp-utils.js';
+import { TempFileUtils } from '../../utils/temp-file-utils.js';
 import { PromptHistory } from '../prompt-history.js';
 
 const colors = Config.colors;
@@ -33,7 +33,7 @@ export class EditCommand extends BaseCommand {
 
         const editor = process.env.EDITOR || 'nano';
         const randomSuffix = randomBytes(4).toString('hex');
-        const tempFile = TempUtils.createTempFile(`aicoder-edit-${randomSuffix}`, '.md');
+        const tempFile = TempFileUtils.createTempFile(`aicoder-edit-${randomSuffix}`, '.md');
 
         try {
             writeFileSync(tempFile, '', 'utf8');

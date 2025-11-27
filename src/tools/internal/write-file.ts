@@ -2,10 +2,10 @@
  * Write file internal tool implementation using centralized file utils
  */
 
-import type { Stats } from '../../core/stats.js';
-import { FileUtils } from '../../core/file-utils.js';
+import { FileUtils } from '../../utils/file-utils.js';
 import { ToolFormatter, type ToolOutput, type ToolPreview } from '../../core/tool-formatter.js';
-import { TempUtils } from '../../core/temp-utils.js';
+import { TempFileUtils } from '../../utils/temp-file-utils.js';
+import { DiffUtils } from '../../utils/diff-utils.js';
 import type { ToolExecutionArgs } from '../../core/types.js';
 
 export interface WriteFileParams {
@@ -17,7 +17,7 @@ export const TOOL_DEFINITION = {
     type: 'internal' as const,
     auto_approved: false,
     approval_excludes_arguments: false,
-    approval_key_exclude_arguments: [],
+    approval_key_exclude_arguments: [] as string[],
     hide_results: false,
     description: 'Writes complete content to a file, creating directories as needed.',
     parameters: {
@@ -35,6 +35,23 @@ export const TOOL_DEFINITION = {
         required: ['path', 'content'],
         additionalProperties: false,
     },
+    validateArguments: (args: ToolExecutionArgs): void => {
+        const { path, content } = args as unknown as WriteFileParams;
+        if (!path || typeof path !== 'string') {
+            throw new Error('write_file requires "path" argument (string)');
+        }
+        if (content === undefined) {
+            throw new Error('write_file requires "content" argument');
+        }
+        // Sandbox check is handled by FileUtils in executeWriteFile
+
+        // Safety: Check if file exists and wasn't read first
+        if (FileUtils.fileExistsWithSandbox(path) && !FileUtils.wasFileRead(path)) {
+            throw new Error(
+                `write_file: File "${path}" exists but wasn't read first. Read it first to avoid accidental overwrites.`
+            );
+        }
+    },
     formatArguments: (args: ToolExecutionArgs): string => {
         const { path, content } = args as unknown as WriteFileParams;
         const lines: string[] = [];
@@ -51,45 +68,30 @@ export const TOOL_DEFINITION = {
 
         try {
             // Check if file exists
-            const exists = FileUtils.fileExists(path);
+            const exists = FileUtils.fileExistsWithSandbox(path);
             let diffContent = '';
 
             // Create temporary files for diff
-            const tempOld = TempUtils.createTempFile('old', '.txt');
-            const tempNew = TempUtils.createTempFile('new', '.txt');
+            const tempOld = TempFileUtils.createTempFile('old', '.txt');
+            const tempNew = TempFileUtils.createTempFile('new', '.txt');
 
             // Write content to temp files
             if (exists) {
-                const existingContent = await FileUtils.readFile(path);
-                await Bun.write(tempOld, existingContent);
+                const existingContent = await FileUtils.readFileWithSandbox(path);
+                await TempFileUtils.writeTempFile(tempOld, existingContent);
             } else {
                 // For new files, write empty content to old file
-                await Bun.write(tempOld, '');
+                await TempFileUtils.writeTempFile(tempOld, '');
             }
-            await Bun.write(tempNew, content);
+            await TempFileUtils.writeTempFile(tempNew, content);
 
-            // Generate diff using system diff command
-            const diffResult = Bun.spawnSync(['diff', '-u', tempOld, tempNew], {
-                stdout: 'pipe',
-                stderr: 'pipe',
-            });
-
-            if (diffResult.exitCode === 0) {
-                diffContent = 'No changes - file content is identical';
-            } else if (diffResult.exitCode === 1) {
-                // Differences found - get raw diff output
-                diffContent = new TextDecoder().decode(diffResult.stdout);
-            } else {
-                diffContent = `Error generating diff: ${new TextDecoder().decode(diffResult.stderr)}`;
-            }
+            // Generate diff using cross-platform utility
+            const diffResult = DiffUtils.generateUnifiedDiffWithStatus(tempOld, tempNew);
+            diffContent = diffResult.diff;
 
             // Cleanup temp files
-            await Bun.file(tempOld)
-                .delete()
-                .catch(() => {});
-            await Bun.file(tempNew)
-                .delete()
-                .catch(() => {});
+            TempFileUtils.deleteFile(tempOld);
+            TempFileUtils.deleteFile(tempNew);
 
             return {
                 tool: 'write_file',
@@ -99,7 +101,7 @@ export const TOOL_DEFINITION = {
                     exists && !FileUtils.wasFileRead(path)
                         ? 'File exists but was not read first - potential overwrite'
                         : undefined,
-                canApprove: diffResult.exitCode === 1, // Only approve if there are actual differences
+                canApprove: diffResult.hasChanges, // Only approve if there are actual differences
                 isDiff: true,
             };
         } catch (error) {
@@ -112,21 +114,22 @@ export const TOOL_DEFINITION = {
             };
         }
     },
+    execute: executeWriteFile,
 };
 
 /**
  * Execute write file operation
  */
-export async function executeWriteFile(params: WriteFileParams, stats: Stats): Promise<ToolOutput> {
+export async function executeWriteFile(args: ToolExecutionArgs): Promise<ToolOutput> {
+    const params = args as unknown as WriteFileParams;
     try {
         const { path, content } = params;
 
         // Use FileUtils for sandboxed file writing
         let result: string;
         try {
-            result = await FileUtils.writeFile(path, content);
+            result = await FileUtils.writeFileWithSandbox(path, content);
         } catch (error) {
-            stats.incrementToolErrors();
             // Create error output
             const errorOutput: ToolOutput = {
                 tool: 'write_file',
@@ -168,13 +171,9 @@ export async function executeWriteFile(params: WriteFileParams, stats: Stats): P
             },
         };
 
-        stats.incrementToolCalls();
-        stats.addToolTime(0.01); // Rough timing estimate
-
         // Return ToolOutput object
         return output;
     } catch (error) {
-        stats.incrementToolErrors();
         const errorOutput: ToolOutput = {
             tool: 'write_file',
             friendly: `ERROR: Failed to write file: ${error instanceof Error ? error.message : String(error)}`,

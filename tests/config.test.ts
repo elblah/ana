@@ -2,7 +2,7 @@
  * Unit tests for Config module
  */
 
-import { describe, it, expect, beforeEach } from 'bun:test';
+import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
 import { Config } from '../src/core/config.js';
 
 describe('Config', () => {
@@ -116,5 +116,7 @@ describe('Config', () => {
         expect(Config.sandboxDisabled).toBe(false);
         process.env.MINI_SANDBOX = '0';
         expect(Config.sandboxDisabled).toBe(true);
+        // Clean up
+        delete process.env.MINI_SANDBOX;
     });
 });

@@ -1,7 +1,7 @@
-import { FileUtils } from '../../core/file-utils.js';
-import type { Stats } from '../../core/stats.js';
+import { FileUtils } from '../../utils/file-utils.js';
+import { TempFileUtils } from '../../utils/temp-file-utils.js';
+import { DiffUtils } from '../../utils/diff-utils.js';
 import { ToolFormatter, type ToolOutput, type ToolPreview } from '../../core/tool-formatter.js';
-import { TempUtils } from '../../core/temp-utils.js';
 import type { ToolExecutionArgs } from '../../core/types.js';
 
 export interface EditFileParams {
@@ -67,13 +67,55 @@ PERFORMANCE NOTE:
         required: ['path', 'old_string', 'new_string'],
     },
     hide_results: false,
-    validate_function: 'validate_edit_file',
+    validateArguments: async (args: ToolExecutionArgs): Promise<void> => {
+        const { path, old_string, new_string } = args as unknown as EditFileParams;
+
+        if (!path || typeof path !== 'string') {
+            throw new Error('edit_file requires "path" argument (string)');
+        }
+        if (typeof old_string !== 'string') {
+            throw new Error('edit_file requires "old_string" argument (string)');
+        }
+        if (typeof new_string !== 'string') {
+            throw new Error('edit_file requires "new_string" argument (string)');
+        }
+
+        // Validate file exists and was read first
+        const exists = await FileUtils.fileExistsWithSandboxAsync(path);
+        if (exists && !FileUtils.wasFileRead(path)) {
+            throw new Error(
+                `edit_file: File "${path}" exists but wasn't read first. Read it first to avoid accidental overwrites.`
+            );
+        }
+
+        // For existing files, validate old_string will match
+        if (exists && old_string !== '') {
+            const content = await FileUtils.readFileWithSandbox(path);
+            if (!content.includes(old_string)) {
+                throw new Error(
+                    `edit_file: old_string not found in file "${path}". Use read_file to see exact content.`
+                );
+            }
+
+            // Check for multiple matches
+            const occurrences = (
+                content.match(new RegExp(old_string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g')) ||
+                []
+            ).length;
+            if (occurrences > 1) {
+                throw new Error(
+                    `edit_file: old_string found ${occurrences} times in file. Make it unique by adding more context.`
+                );
+            }
+        }
+    },
     formatArguments: (args: ToolExecutionArgs): string => {
         const lines: string[] = [];
-        lines.push(`Path: ${(args as any).path}`);
+        const editArgs = args as unknown as EditFileParams;
+        lines.push(`Path: ${editArgs.path}`);
 
-        const oldString = (args as any).old_string;
-        const newString = (args as any).new_string;
+        const oldString = editArgs.old_string;
+        const newString = editArgs.new_string;
 
         if (oldString && oldString.length > 0) {
             const oldPreview =
@@ -102,7 +144,7 @@ PERFORMANCE NOTE:
 
             // Handle file creation (old_string is empty)
             if (old_string === '') {
-                const exists = FileUtils.fileExists(path);
+                const exists = FileUtils.fileExistsWithSandbox(path);
                 if (exists) {
                     return {
                         tool: 'edit_file',
@@ -114,38 +156,22 @@ PERFORMANCE NOTE:
                 }
 
                 // Create temporary files for diff (empty vs new content)
-                const tempOld = TempUtils.createTempFile('original', '.txt');
-                const tempNew = TempUtils.createTempFile('modified', '.txt');
+                const tempOld = TempFileUtils.createTempFile('original', '.txt');
+                const tempNew = TempFileUtils.createTempFile('modified', '.txt');
 
                 // Write content to temp files (empty file vs new content)
-                await Bun.write(tempOld, '');
-                await Bun.write(tempNew, new_string);
+                await TempFileUtils.writeTempFile(tempOld, '');
+                await TempFileUtils.writeTempFile(tempNew, new_string);
 
-                // Generate diff using system diff command
-                const diffResult = Bun.spawnSync(['diff', '-u', tempOld, tempNew], {
-                    stdout: 'pipe',
-                    stderr: 'pipe',
-                });
-
-                if (diffResult.exitCode === 0) {
-                    diffContent = 'No changes - content is identical';
-                } else if (diffResult.exitCode === 1) {
-                    // Differences found - get raw diff output
-                    diffContent = new TextDecoder().decode(diffResult.stdout);
-                } else {
-                    diffContent = `Error generating diff: ${new TextDecoder().decode(diffResult.stderr)}`;
-                }
+                // Generate diff using cross-platform utility
+                diffContent = DiffUtils.generateUnifiedDiff(tempOld, tempNew);
 
                 // Cleanup temp files
-                await Bun.file(tempOld)
-                    .delete()
-                    .catch(() => {});
-                await Bun.file(tempNew)
-                    .delete()
-                    .catch(() => {});
+                TempFileUtils.deleteFile(tempOld);
+                TempFileUtils.deleteFile(tempNew);
             } else {
                 // File editing
-                const exists = FileUtils.fileExists(path);
+                const exists = FileUtils.fileExistsWithSandbox(path);
                 if (!exists) {
                     return {
                         tool: 'edit_file',
@@ -162,7 +188,7 @@ PERFORMANCE NOTE:
                 }
 
                 // Read current content
-                const currentContent = await FileUtils.readFile(path);
+                const currentContent = await FileUtils.readFileWithSandbox(path);
 
                 // Check if old_string exists and is unique
                 if (!currentContent.includes(old_string)) {
@@ -187,40 +213,24 @@ PERFORMANCE NOTE:
                 }
 
                 // Create temporary files for diff
-                const tempOld = TempUtils.createTempFile('original', '.txt');
-                const tempNew = TempUtils.createTempFile('modified', '.txt');
+                const tempOld = TempFileUtils.createTempFile('original', '.txt');
+                const tempNew = TempFileUtils.createTempFile('modified', '.txt');
 
                 // Write content to temp files
-                await Bun.write(tempOld, currentContent);
+                await TempFileUtils.writeTempFile(tempOld, currentContent);
 
                 // Apply the edit to get new content
                 const newContent = currentContent.replace(old_string, new_string);
-                await Bun.write(tempNew, newContent);
+                await TempFileUtils.writeTempFile(tempNew, newContent);
 
-                // Generate diff using system diff command
-                const diffResult = Bun.spawnSync(['diff', '-u', tempOld, tempNew], {
-                    stdout: 'pipe',
-                    stderr: 'pipe',
-                });
-
-                let hasChanges = false;
-                if (diffResult.exitCode === 0) {
-                    diffContent = 'No changes - content is identical';
-                } else if (diffResult.exitCode === 1) {
-                    // Differences found - get raw diff output
-                    diffContent = new TextDecoder().decode(diffResult.stdout);
-                    hasChanges = true;
-                } else {
-                    diffContent = `Error generating diff: ${new TextDecoder().decode(diffResult.stderr)}`;
-                }
+                // Generate diff using cross-platform utility
+                const diffResult = DiffUtils.generateUnifiedDiffWithStatus(tempOld, tempNew);
+                diffContent = diffResult.diff;
+                const hasChanges = diffResult.hasChanges;
 
                 // Cleanup temp files
-                await Bun.file(tempOld)
-                    .delete()
-                    .catch(() => {});
-                await Bun.file(tempNew)
-                    .delete()
-                    .catch(() => {});
+                TempFileUtils.deleteFile(tempOld);
+                TempFileUtils.deleteFile(tempNew);
 
                 return {
                     tool: 'edit_file',
@@ -251,17 +261,17 @@ PERFORMANCE NOTE:
             };
         }
     },
+    execute: executeEditFile,
 };
 
 /**
  * Execute edit_file operation
  */
 export async function executeEditFile(
-    args: { path: string; old_string: string; new_string: string },
-    stats: Stats
+    args: ToolExecutionArgs
 ): Promise<ToolOutput> {
+    const { path, old_string, new_string } = args as unknown as EditFileParams;
     try {
-        const { path, old_string, new_string } = args;
 
         // Safety check: File must have been read first (tracked by FileUtils)
         if (!FileUtils.wasFileRead(path)) {
@@ -281,13 +291,12 @@ export async function executeEditFile(
 
         // Handle file creation (old_string is empty)
         if (old_string === '') {
-            return await createFile(path, new_string, stats);
+            return await createFile(path, new_string);
         }
 
         // Handle content replacement
-        return await replaceContent(path, old_string, new_string, stats);
+        return await replaceContent(path, old_string, new_string);
     } catch (error) {
-        stats.incrementToolErrors();
         const errorOutput: ToolOutput = {
             tool: 'edit_file',
             friendly: `ERROR: Failed to edit '${args.path}': ${error instanceof Error ? error.message : String(error)}`,
@@ -306,10 +315,10 @@ export async function executeEditFile(
 /**
  * Create a new file
  */
-async function createFile(path: string, content: string, stats: Stats): Promise<ToolOutput> {
+async function createFile(path: string, content: string): Promise<ToolOutput> {
     try {
         // Check if file already exists
-        const exists = await FileUtils.fileExists(path);
+        const exists = await FileUtils.fileExistsWithSandboxAsync(path);
         if (exists) {
             const errorOutput: ToolOutput = {
                 tool: 'edit_file',
@@ -326,7 +335,7 @@ async function createFile(path: string, content: string, stats: Stats): Promise<
         }
 
         // Write the file (sandboxed)
-        await FileUtils.writeFile(path, content);
+        await FileUtils.writeFileWithSandbox(path, content);
 
         const output: ToolOutput = {
             tool: 'edit_file',
@@ -367,12 +376,11 @@ async function createFile(path: string, content: string, stats: Stats): Promise<
 async function replaceContent(
     path: string,
     oldString: string,
-    newString: string,
-    stats: Stats
+    newString: string
 ): Promise<ToolOutput> {
     try {
         // Read current content (sandboxed)
-        const content = await FileUtils.readFile(path);
+        const content = await FileUtils.readFileWithSandbox(path);
 
         // Check if old_string exists
         if (!content.includes(oldString)) {
@@ -436,7 +444,7 @@ async function replaceContent(
         const newContent = content.replace(oldString, newString);
 
         // Write back to file (sandboxed)
-        await FileUtils.writeFile(path, newContent);
+        await FileUtils.writeFileWithSandbox(path, newContent);
 
         const output: ToolOutput = {
             tool: 'edit_file',
@@ -536,53 +544,4 @@ Tip: Use read_file('${path}') to see the exact current content.`;
     }
 
     return `Use read_file('${path}') to see current content and ensure old_string matches exactly.`;
-}
-
-/**
- * Validate edit_file arguments (pre-execution)
- */
-export async function validate_edit_file(args: {
-    path: string;
-    old_string: string;
-    new_string: string;
-}): Promise<string | true> {
-    try {
-        const { path, old_string, new_string } = args;
-
-        // File creation (old_string is empty)
-        if (old_string === '') {
-            const exists = await FileUtils.fileExists(path);
-            if (exists) {
-                return `Error: File already exists: ${path}`;
-            }
-            return true;
-        }
-
-        // File editing
-        const exists = await FileUtils.fileExists(path);
-        if (!exists) {
-            return `Error: File not found: ${path}`;
-        }
-
-        // For existing files, check if old_string exists
-        const content = await FileUtils.readFile(path);
-        if (!content.includes(old_string)) {
-            return generateNotFoundSuggestion(content, old_string, path);
-        }
-
-        // Check for multiple matches
-        const occurrences = countOccurrences(content, old_string);
-        if (occurrences > 1) {
-            return `Error: old_string appears ${occurrences} times. Provide more context to make it unique.`;
-        }
-
-        // Check if content is changing
-        if (old_string === new_string) {
-            return 'Error: new_string is the same as old_string';
-        }
-
-        return true;
-    } catch (error) {
-        return `Validation error: ${error instanceof Error ? error.message : String(error)}`;
-    }
 }

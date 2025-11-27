@@ -2,7 +2,6 @@
  * Centralized tool output formatter
  */
 
-import { DetailMode } from './detail-mode.js';
 import { Config } from './config.js';
 
 export interface ToolOutput {
@@ -109,7 +108,7 @@ export class ToolFormatter {
             }
         }
 
-        // Always show results (except for showWhenDetailOff flag which is for display purposes)
+        // Always show results (except for showWhenDetailOff flag)
         if (output.results) {
             for (const [key, value] of Object.entries(output.results)) {
                 if (key !== 'showWhenDetailOff') {
@@ -117,12 +116,6 @@ export class ToolFormatter {
                     lines.push(`${indent}${label}${this.formatValueForAI(value)}`);
                 }
             }
-        }
-
-        // Add empty line before actual result content
-        if (output.results?.content && lines.length > 0) {
-            lines.push('');
-            lines.push(output.results.content as string);
         }
 
         return lines.join('\n');
@@ -152,7 +145,7 @@ export class ToolFormatter {
     }
 
     /**
-     * Format tool output for local display (when detail mode is off)
+     * Format tool output for local display (always show friendly when available)
      */
     static formatForDisplay(output: ToolOutput): string | null {
         return output.friendly || null;
@@ -182,7 +175,7 @@ export class ToolFormatter {
         }
         if (typeof value === 'string') {
             // Truncate very long strings in non-detail mode
-            if (!DetailMode.enabled && value.length > 100) {
+            if (!Config.detailMode && value.length > 100) {
                 return ` ${value.substring(0, 97)}...`;
             }
             return ` ${value}`;
@@ -192,7 +185,7 @@ export class ToolFormatter {
         }
         // For objects, JSON stringify with truncation
         const jsonStr = JSON.stringify(value);
-        if (!DetailMode.enabled && jsonStr.length > 100) {
+        if (!Config.detailMode && jsonStr.length > 100) {
             return ` ${jsonStr.substring(0, 97)}...`;
         }
         return ` ${jsonStr}`;

@@ -2,8 +2,7 @@
  * Read file internal tool implementation using centralized file utils
  */
 
-import type { Stats } from '../../core/stats.js';
-import { FileUtils } from '../../core/file-utils.js';
+import { FileUtils } from '../../utils/file-utils.js';
 import { ToolFormatter, type ToolOutput } from '../../core/tool-formatter.js';
 import type { ToolExecutionArgs } from '../../core/types.js';
 
@@ -17,7 +16,7 @@ export const TOOL_DEFINITION = {
     type: 'internal' as const,
     auto_approved: true,
     approval_excludes_arguments: false,
-    approval_key_exclude_arguments: [],
+    approval_key_exclude_arguments: [] as string[],
     hide_results: false,
     description:
         'Reads the content from a specified file path. Supports pagination with offset and limit parameters.',
@@ -42,6 +41,13 @@ export const TOOL_DEFINITION = {
         required: ['path'],
         additionalProperties: false,
     },
+    validateArguments: (args: ToolExecutionArgs): void => {
+        const { path } = args as unknown as ReadFileParams;
+        if (!path || typeof path !== 'string') {
+            throw new Error('read_file requires "path" argument (string)');
+        }
+        // Sandbox check is handled by FileUtils in executeReadFile
+    },
     formatArguments: (args: ToolExecutionArgs): string => {
         const { path, offset = 0, limit = DEFAULT_READ_LIMIT } = args as unknown as ReadFileParams;
         const lines: string[] = [];
@@ -57,6 +63,7 @@ export const TOOL_DEFINITION = {
 
         return lines.join('\n  ');
     },
+    execute: executeReadFile,
 };
 
 const DEFAULT_READ_LIMIT = 2000;
@@ -65,16 +72,16 @@ const MAX_LINE_LENGTH = 2000;
 /**
  * Execute read file operation
  */
-export async function executeReadFile(params: ReadFileParams, stats: Stats): Promise<ToolOutput> {
+export async function executeReadFile(args: ToolExecutionArgs): Promise<ToolOutput> {
+    const params = args as unknown as ReadFileParams;
     try {
         const { path, offset = 0, limit = DEFAULT_READ_LIMIT } = params;
 
         // Use FileUtils for sandboxed file reading
         let content: string;
         try {
-            content = await FileUtils.readFile(path);
+            content = await FileUtils.readFileWithSandbox(path);
         } catch (error) {
-            stats.incrementToolErrors();
             const errorOutput: ToolOutput = {
                 tool: 'read_file',
                 friendly: `ERROR: Failed to read file: ${error instanceof Error ? error.message : String(error)}`,
@@ -157,13 +164,9 @@ export async function executeReadFile(params: ReadFileParams, stats: Stats): Pro
             },
         };
 
-        stats.incrementToolCalls();
-        stats.addToolTime(0.01); // Rough timing estimate
-
         // Return ToolOutput object
         return output;
     } catch (error) {
-        stats.incrementToolErrors();
         const errorOutput: ToolOutput = {
             tool: 'read_file',
             friendly: `ERROR: Failed to read file: ${error instanceof Error ? error.message : String(error)}`,

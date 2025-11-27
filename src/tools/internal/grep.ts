@@ -2,8 +2,8 @@
  * Grep internal tool implementation using ripgrep when available
  */
 
-import type { Stats } from '../../core/stats.js';
 import { Config } from '../../core/config.js';
+import { FileUtils } from '../../utils/file-utils.js';
 import { spawn } from 'node:child_process';
 import { resolve } from 'node:path';
 import { ToolFormatter, type ToolOutput } from '../../core/tool-formatter.js';
@@ -20,7 +20,7 @@ export const TOOL_DEFINITION = {
     type: 'internal' as const,
     auto_approved: true,
     approval_excludes_arguments: false,
-    approval_key_exclude_arguments: [],
+    approval_key_exclude_arguments: [] as string[],
     hide_results: false,
     description:
         'Search text in files using ripgrep with line numbers. Path defaults to current directory.',
@@ -47,6 +47,13 @@ export const TOOL_DEFINITION = {
         required: ['text'],
         additionalProperties: false,
     },
+    validateArguments: (args: ToolExecutionArgs): void => {
+        const { text } = args as unknown as GrepParams;
+        if (!text || typeof text !== 'string') {
+            throw new Error('grep requires "text" argument (string)');
+        }
+        // Sandbox check is now handled by FileUtils
+    },
     formatArguments: (args: ToolExecutionArgs): string => {
         const { text, path, max_results, context } = args as unknown as GrepParams;
         const parts: string[] = [];
@@ -62,6 +69,7 @@ export const TOOL_DEFINITION = {
         }
         return parts.join('\n  ');
     },
+    execute: executeGrep,
 };
 
 const MAX_RESULTS = 2000;
@@ -69,14 +77,12 @@ const MAX_RESULTS = 2000;
 /**
  * Execute grep operation
  */
-export async function executeGrep(params: GrepParams, stats: Stats): Promise<ToolOutput> {
-    const startTime = Date.now();
-    const { text, path = '.', max_results = MAX_RESULTS, context = 2 } = params;
+export async function executeGrep(args: ToolExecutionArgs): Promise<ToolOutput> {
+    const { text, path = '.', max_results = MAX_RESULTS, context = 2 } = args as unknown as GrepParams;
 
     try {
         // Validate search text
         if (!text.trim()) {
-            stats.incrementToolErrors();
             const errorOutput: ToolOutput = {
                 tool: 'grep',
                 important: {
@@ -92,6 +98,22 @@ export async function executeGrep(params: GrepParams, stats: Stats): Promise<Too
 
         // Resolve path using Node.js
         const searchPath = resolve(process.cwd(), path);
+
+        // Check sandbox using FileUtils
+        if (!FileUtils.checkSandbox(searchPath, 'grep')) {
+            const errorOutput: ToolOutput = {
+                tool: 'grep',
+                friendly: `ERROR: Failed to search: path "${path}" outside current directory not allowed`,
+                important: {
+                    text: text,
+                },
+                results: {
+                    error: `path "${path}" outside current directory not allowed`,
+                    showWhenDetailOff: true,
+                },
+            };
+            return errorOutput;
+        }
 
         // Use ripgrep with node:child_process
         const proc = spawn(
@@ -124,8 +146,6 @@ export async function executeGrep(params: GrepParams, stats: Stats): Promise<Too
 
         return new Promise((resolve, reject) => {
             proc.on('close', (code: number | null) => {
-                const duration = Number.parseFloat(((Date.now() - startTime) / 1000).toFixed(2));
-
                 if (code === 0 && stdout) {
                     // Count matches
                     const matchCount = stdout.split('\n').filter((line) => line.trim()).length;
@@ -145,7 +165,6 @@ export async function executeGrep(params: GrepParams, stats: Stats): Promise<Too
                             path: path,
                             max_results: max_results,
                             context: context,
-                            duration: `${duration}s`,
                         },
                         results: {
                             match_count: matchCount,
@@ -154,8 +173,6 @@ export async function executeGrep(params: GrepParams, stats: Stats): Promise<Too
                         },
                     };
 
-                    stats.addToolTime(duration);
-                    stats.incrementToolCalls();
                     resolve(output);
                 } else if (code === 1 && !stdout) {
                     const output: ToolOutput = {
@@ -166,7 +183,6 @@ export async function executeGrep(params: GrepParams, stats: Stats): Promise<Too
                         },
                         detailed: {
                             path: path,
-                            duration: `${duration}s`,
                         },
                         results: {
                             match_count: 0,
@@ -175,43 +191,36 @@ export async function executeGrep(params: GrepParams, stats: Stats): Promise<Too
                         },
                     };
 
-                    stats.incrementToolErrors();
-                    stats.addToolTime(duration);
                     resolve(output);
                 } else {
                     const errorOutput: ToolOutput = {
                         tool: 'grep',
-                        friendly: `Search error: ${stderr || `exit code ${code}`}`,
+                        friendly: `ERROR: Failed to search: ${stderr || `exit code ${code}`}`,
                         important: {
                             text: text,
                         },
                         detailed: {
                             path: path,
-                            duration: `${duration}s`,
                         },
                         results: {
-                            error: `Error searching: ${stderr || `exit code ${code}`}`,
+                            error: stderr || `exit code ${code}`,
                             showWhenDetailOff: true,
                         },
                     };
 
-                    stats.incrementToolErrors();
-                    stats.addToolTime(duration);
                     resolve(errorOutput);
                 }
             });
 
             proc.on('error', (error: Error) => {
-                stats.incrementToolErrors();
-                stats.addToolTime((Date.now() - startTime) / 1000);
                 const errorOutput: ToolOutput = {
                     tool: 'grep',
-                    friendly: `Search failed: ${error.message}`,
+                    friendly: `ERROR: Failed to search: ${error.message}`,
                     important: {
                         text: text,
                     },
                     results: {
-                        error: `Error searching: ${error.message}`,
+                        error: error.message,
                         showWhenDetailOff: true,
                     },
                 };
@@ -219,17 +228,14 @@ export async function executeGrep(params: GrepParams, stats: Stats): Promise<Too
             });
         });
     } catch (error) {
-        const duration = Number.parseFloat(((Date.now() - startTime) / 1000).toFixed(2));
-        stats.incrementToolErrors();
-        stats.addToolTime(duration);
         const errorOutput: ToolOutput = {
             tool: 'grep',
-            friendly: `Search failed: ${error instanceof Error ? error.message : String(error)}`,
+            friendly: `ERROR: Failed to search: ${error instanceof Error ? error.message : String(error)}`,
             important: {
                 text: text,
             },
             results: {
-                error: `Error searching: ${error instanceof Error ? error.message : String(error)}`,
+                error: error instanceof Error ? error.message : String(error),
                 showWhenDetailOff: true,
             },
         };

@@ -4,10 +4,13 @@
 
 import { BaseCommand, type CommandResult } from './base.js';
 import { Config } from '../config.js';
+import { LogUtils } from '../../utils/log-utils.js';
+import { FileUtils } from '../../utils/file-utils.js';
 import { unlinkSync } from 'node:fs';
 import { exec } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { TempUtils } from '../temp-utils.js';
+import { TempFileUtils } from '../../utils/temp-file-utils.js';
+import { JsonUtils } from '../../utils/json-utils.js';
 
 export class MemoryCommand extends BaseCommand {
     protected name = 'memory';
@@ -19,32 +22,27 @@ export class MemoryCommand extends BaseCommand {
 
     async execute(args: string[]): Promise<CommandResult> {
         if (!process.env.TMUX) {
-            console.log(
-                `${Config.colors.red}This command only works inside a tmux environment.${Config.colors.reset}`
-            );
-            console.log(
-                `${Config.colors.yellow}Please run this command inside tmux.${Config.colors.reset}`
-            );
+            LogUtils.error('This command only works inside a tmux environment.');
+            LogUtils.warn('Please run this command inside tmux.');
             return { shouldQuit: false, runApiCall: false };
         }
 
         const editor = process.env.EDITOR || 'nano';
         const randomSuffix = randomBytes(4).toString('hex');
-        const tempFile = TempUtils.createTempFile(`aicoder-memory-${randomSuffix}`, '.json');
+        const tempFile = TempFileUtils.createTempFile(`aicoder-memory-${randomSuffix}`, '.json');
 
         try {
             const messages = this.context.messageHistory.getMessages();
 
-            await Bun.write(tempFile, JSON.stringify(messages, null, 2));
-            console.log(
-                `${Config.colors.cyan}Exported ${messages.length} messages to ${tempFile}${Config.colors.reset}`
-            );
+            await JsonUtils.writeFile(tempFile, messages as unknown);
+            LogUtils.print(`Exported ${messages.length} messages to ${tempFile}`, {
+                color: Config.colors.cyan,
+            });
 
-            console.log(
-                `${Config.colors.cyan}Opening ${editor} in tmux window...${Config.colors.reset}`
-            );
-            console.log(
-                `${Config.colors.dim}Save and exit when done. The editor is running in a separate tmux window.${Config.colors.reset}`
+            LogUtils.print(`Opening ${editor} in tmux window...`, { color: Config.colors.cyan });
+            LogUtils.print(
+                'Save and exit when done. The editor is running in a separate tmux window.',
+                { color: Config.colors.dim }
             );
 
             const syncPoint = `memory_done_${randomSuffix}`;
@@ -65,14 +63,12 @@ export class MemoryCommand extends BaseCommand {
                 });
             });
 
-            const file = Bun.file(tempFile);
-            if (!file.exists()) {
-                console.log(
-                    `${Config.colors.red}Session file not found after editing${Config.colors.reset}`
-                );
+            if (!(await FileUtils.fileExistsAsync(tempFile))) {
+                LogUtils.error(`Session file not found after editing`);
                 return { shouldQuit: false, runApiCall: false };
             }
 
+            const file = Bun.file(tempFile);
             const editedMessages = JSON.parse(await file.text());
 
             if (Array.isArray(editedMessages)) {
@@ -101,27 +97,23 @@ export class MemoryCommand extends BaseCommand {
                             ]);
                             break;
                         default:
-                            console.log(
-                                `${Config.colors.yellow}Warning: Unknown message role '${msg.role}', treating as user${Config.colors.reset}`
+                            LogUtils.warn(
+                                `Warning: Unknown message role '${msg.role}', treating as user`
                             );
                             this.context.messageHistory.addUserMessage(msg.content || '');
                     }
                 }
 
-                console.log(
-                    `${Config.colors.green}Reloaded ${editedMessages.length} messages from editor${Config.colors.reset}`
-                );
+                LogUtils.success(`Reloaded ${editedMessages.length} messages from editor`);
             } else {
-                console.log(
-                    `${Config.colors.red}Invalid session file format${Config.colors.reset}`
-                );
+                LogUtils.error(`Invalid session file format`);
             }
 
             try {
                 unlinkSync(tempFile);
             } catch {}
         } catch (error) {
-            console.log(`${Config.colors.red}Memory edit failed: ${error}${Config.colors.reset}`);
+            LogUtils.error(`Memory edit failed: ${error}`);
             try {
                 unlinkSync(tempFile);
             } catch {}

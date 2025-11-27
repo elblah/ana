@@ -4,16 +4,19 @@
 
 import { Config } from './config.js';
 import { Stats } from './stats.js';
+import { LogUtils } from '../utils/log-utils.js';
 import { MessageHistory, Message } from './message-history.js';
 import { StreamingClient, StreamChunk, type ToolCall } from './streaming-client.js';
-import type { MessageToolCall } from './types.js';
+import type { MessageToolCall, StreamChunkData } from './types.js';
 import { ToolManager } from './tool-manager.js';
 import { ToolFormatter } from './tool-formatter.js';
 import { InputHandler } from './input-handler.js';
 import { CommandHandler } from './command-handler.js';
-import { DetailMode } from './detail-mode.js';
 import { pluginSystem } from './plugin-system.js';
+import type { ToolExecutionArgs } from './types.js';
+import type { ToolOutput } from './tool-formatter.js';
 import { ContextBar } from './context-bar.js';
+import { StreamUtils } from '../utils/stream-utils.js';
 import { PromptBuilder } from '../prompts/prompt-builder.js';
 import { expandSnippets } from './snippet-utils.js';
 import type { NotificationHooks, HookName } from './types.js';
@@ -65,121 +68,110 @@ export class AICoder {
      * Initialize plugin system
      */
     private initializePlugins(): void {
+        if (Config.disablePlugins) {
+            LogUtils.warn('[*] Plugins disabled via DISABLE_PLUGINS environment variable');
+            return;
+        }
+
         try {
-            // Check if plugins are disabled via configuration
-            if (Config.disablePlugins) {
-                console.log(
-                    `${Config.colors.yellow}[*] Plugins disabled via DISABLE_PLUGINS environment variable${Config.colors.reset}`
-                );
-                return;
-            }
-
-            // Connect plugin system context to actual command handler FIRST
-            pluginSystem.setContext({
-                config: Config,
-                registerCommand: (name, handler, description) => {
-                    if (Config.debug) {
-                        console.log(`[DEBUG] Registering command: ${name}`);
-                    }
-                    this.commandHandler.registerCommand(name, handler, description);
-                },
-                addUserMessage: (message) => this.messageHistory.addUserMessage(message),
-                addSystemMessage: (message) => this.messageHistory.addSystemMessage(message),
-                getConfig: (key) => process.env[`AICODER_${key.toUpperCase()}`],
-                setConfig: (key, value) => {
-                    process.env[`AICODER_${key.toUpperCase()}`] = String(value);
-                },
-                originalWriteFile: async (path, content) =>
-                    this.toolManager.originalWriteFile(path, content),
-                originalEditFile: async (path, oldStr, newStr) =>
-                    this.toolManager.originalEditFile(path, oldStr, newStr),
-                app: this as Record<string, unknown>,
-                registerNotifyHooks: (hooks: NotificationHooks) => this.registerNotifyHooks(hooks),
-            });
-
-            if (Config.debug) {
-                console.log('[DEBUG] Plugin context connected, now loading plugins...');
-            }
-
+            this.setupPluginContext();
             pluginSystem.loadPlugins();
-
-            if (Config.debug) {
-                console.log('[DEBUG] Plugins loaded, adding tools...');
-            }
-
-            // Add plugin tools to tool manager
-            const pluginTools = pluginSystem.getAllTools();
-            for (const [toolName, tool] of pluginTools) {
-                this.toolManager.addPluginTool(
-                    tool.name,
-                    tool.description,
-                    tool.parameters,
-                    tool.execute,
-                    'plugin',
-                    tool.auto_approved || false
-                );
-            }
+            this.addPluginTools();
         } catch (error) {
-            console.log(
-                `${Config.colors.yellow}[!] Plugin initialization failed: ${error}${Config.colors.reset}`
+            LogUtils.warn(`[!] Plugin initialization failed: ${error}`);
+        }
+    }
+
+    private setupPluginContext(): void {
+        pluginSystem.setContext({
+            config: Config,
+            registerCommand: (name, handler, description) => {
+                LogUtils.debug(`[DEBUG] Registering command: ${name}`);
+                this.commandHandler.registerCommand(name, handler, description);
+            },
+            addUserMessage: (message) => this.messageHistory.addUserMessage(message),
+            addSystemMessage: (message) => this.messageHistory.addSystemMessage(message),
+            getConfig: (key) => process.env[`AICODER_${key.toUpperCase()}`],
+            setConfig: (key, value) => {
+                process.env[`AICODER_${key.toUpperCase()}`] = String(value);
+            },
+            originalWriteFile: async (path, content) =>
+                this.toolManager.originalWriteFile(path, content),
+            originalEditFile: async (path, oldStr, newStr) =>
+                this.toolManager.originalEditFile(path, oldStr, newStr),
+            app: this as Record<string, unknown>,
+            registerNotifyHooks: (hooks: NotificationHooks) => this.registerNotifyHooks(hooks),
+        });
+
+        LogUtils.debug('[DEBUG] Plugin context connected, now loading plugins...');
+    }
+
+    private addPluginTools(): void {
+        LogUtils.debug('[DEBUG] Plugins loaded, adding tools...');
+
+        const pluginTools = pluginSystem.getAllTools();
+        for (const [toolName, tool] of pluginTools) {
+            this.toolManager.addPluginTool(
+                tool.name,
+                tool.description,
+                tool.parameters,
+                tool.execute as unknown as (args: ToolExecutionArgs) => Promise<ToolOutput>,
+                'plugin',
+                tool.auto_approved || false
             );
         }
     }
 
     /**
-     * Unified signal handler with debouncing
+     * Simple signal handler
      */
-    private handleSignal = (signalName: string): void => {
-        // Clear any existing debounce timeout
+    private handleSignal = (): void => {
+        // Clear existing timeout
         if (this.signalDebounceTimeout) {
             clearTimeout(this.signalDebounceTimeout);
         }
 
-        // Debounce signal handling to prevent duplicates from readline, firejail, etc.
         this.signalDebounceTimeout = setTimeout(() => {
             const now = Date.now();
-            const timeSinceLastSigint = now - this.lastSigintTime;
+            const timeSinceLast = now - this.lastSigintTime;
 
-            // Guard clause: Second signal after 1 second - exit
-            if (this.sigintWarningShown && timeSinceLastSigint >= 1000) {
-                console.log(`\n${Config.colors.green}[*] Exiting gracefully${Config.colors.reset}`);
+            // Second signal after 1 second - exit
+            if (this.sigintWarningShown && timeSinceLast >= 1000) {
+                LogUtils.success('\n[*] Exiting gracefully');
                 process.exit(0);
             }
 
-            // Guard clause: Signal pressed too quickly - show wait time
-            if (this.sigintWarningShown && timeSinceLastSigint < 1000) {
-                const remainingTime = Math.ceil((1000 - timeSinceLastSigint) / 100) / 10;
+            // Signal pressed too quickly - show wait time
+            if (this.sigintWarningShown && timeSinceLast < 1000) {
+                const waitTime = Math.ceil((1000 - timeSinceLast) / 100) / 10;
                 if (this.isProcessing) {
-                    console.log(
-                        `\n${Config.colors.yellow}[!] Please wait ${remainingTime}s before pressing Ctrl+C again to exit${Config.colors.reset}`
+                    LogUtils.warn(
+                        `\n[!] Please wait ${waitTime}s before pressing Ctrl+C again to exit`
                     );
                 }
                 return;
             }
 
-            // First signal - only show message if AI is processing
+            // First signal - only show if AI is processing
             if (this.isProcessing) {
-                // During processing - interrupt gracefully
-                console.log(
-                    `\n${Config.colors.yellow}[*] Process interrupted - please wait${Config.colors.reset}`
-                );
-                console.log(
-                    `${Config.colors.cyan}[*] Press Ctrl+C again (after 1 second) to exit or wait for prompt${Config.colors.reset}`
+                LogUtils.warn(`\n[*] Process interrupted - please wait`);
+                LogUtils.print(
+                    `[*] Press Ctrl+C again (after 1 second) to exit or wait for prompt`,
+                    { color: Config.colors.cyan }
                 );
                 this.isProcessing = false;
             }
-            // If not processing - don't show any message
 
             this.lastSigintTime = now;
             this.sigintWarningShown = true;
-        }, 100); // 100ms debounce to catch all duplicate signals
+        }, 100); // Debounce duplicates
     };
 
     /**
      * Setup interrupt handling
      */
     private setupInterruptHandling(): void {
-        process.on('SIGINT', () => this.handleSignal('SIGINT'));
+        process.on('SIGINT', () => this.handleSignal());
     }
 
     /**
@@ -220,6 +212,97 @@ export class AICoder {
     }
 
     /**
+     * Perform auto-compaction with consistent logging
+     */
+    private async performAutoCompaction(context = 'during processing'): Promise<void> {
+        LogUtils.warn(`*** Auto-compaction triggered ${context} ***`);
+        try {
+            await this.messageHistory.compactMemory();
+            LogUtils.success('*** Auto-compaction completed ***');
+        } catch (error) {
+            LogUtils.warn(`*** Auto-compaction skipped: ${error} ***`);
+        }
+    }
+
+    /**
+     * Add user input with snippet expansion
+     */
+    private async addUserInput(input: string): Promise<void> {
+        const processed = expandSnippets(input);
+        if (processed !== input) {
+            LogUtils.print('[Snippets expanded]', { color: Config.colors.cyan });
+        }
+        this.inputHandler.addToHistory(input);
+        this.stats.setLastUserPrompt(input);
+        this.messageHistory.addUserMessage(processed);
+    }
+
+    /**
+     * Accumulate tool call from stream
+     */
+    private accumulateToolCall(toolCall: MessageToolCall, accumulated: Map<number, ToolCall>): void {
+        const index = toolCall.index;
+
+        if (accumulated.has(index)) {
+            const existing = accumulated.get(index)!;
+            if (toolCall.function?.arguments) {
+                existing.function.arguments += toolCall.function.arguments;
+            }
+            return;
+        }
+
+        if (!toolCall.function?.name) {
+            LogUtils.error('Invalid tool call: missing function name');
+            return;
+        }
+
+        accumulated.set(index, {
+            id: toolCall.id || `tool_call_${index}_${Date.now()}`,
+            type: toolCall.type || 'function',
+            function: {
+                name: toolCall.function.name,
+                arguments: toolCall.function?.arguments || '',
+            },
+        });
+    }
+
+    private debugToolCalls(toolCalls: ToolCall[]): void {
+        if (!Config.debug) return;
+
+        LogUtils.print(`Tool calls accumulated: ${toolCalls.length}`, {
+            color: Config.colors.yellow,
+        });
+        for (const tc of toolCalls) {
+            const argsPreview = tc.function.arguments.substring(0, 100);
+            const ellipsis = tc.function.arguments.length > 100 ? '...' : '';
+            LogUtils.print(`- ${tc.function.name}: ${argsPreview}${ellipsis}`, {
+                color: Config.colors.yellow,
+            });
+        }
+    }
+
+    private validateToolCalls(toolCalls: ToolCall[]): ToolCall[] {
+        return toolCalls.filter((toolCall) => {
+            if (!toolCall.function?.name || !toolCall.id) {
+                LogUtils.error('Invalid tool call: missing name or id');
+                return false;
+            }
+            return true;
+        });
+    }
+
+    private handleEmptyResponse(fullResponse: string): void {
+        if (fullResponse) {
+            this.messageHistory.addAssistantMessage({ content: fullResponse });
+            console.log('');
+            return;
+        }
+
+        this.messageHistory.addAssistantMessage({ content: '[No response received]' });
+        LogUtils.warn('[No response received - continuing...]');
+    }
+
+    /**
      * Run the main application loop
      */
     async run(): Promise<void> {
@@ -239,43 +322,23 @@ export class AICoder {
 
         // Interactive mode
         Config.printStartupInfo();
-        console.log(
-            `${Config.colors.green}Type your message or /help for commands.${Config.colors.reset}`
-        );
+        LogUtils.success('Type your message or /help for commands.');
 
         while (this.isRunning) {
             try {
-                // Check for auto-compaction
+                // Auto-compaction check
                 if (this.messageHistory.shouldAutoCompact()) {
-                    console.log(
-                        `${Config.colors.yellow}*** Auto-compaction triggered ***${Config.colors.reset}`
-                    );
-                    try {
-                        await this.messageHistory.compactMemory();
-                        console.log(
-                            `${Config.colors.green}*** Auto-compaction completed ***${Config.colors.reset}`
-                        );
-                    } catch (error) {
-                        console.log(
-                            `${Config.colors.yellow}*** Auto-compaction skipped: ${error} ***${Config.colors.reset}`
-                        );
-                    }
+                    await this.performAutoCompaction();
                 }
 
                 // Get user input (with notification hook)
                 await this.callNotifyHook('onBeforeUserPrompt');
-                const userInput = await this.inputHandler.getMultilineInput();
+                const userInput = await this.inputHandler.getUserInput();
 
-                // Don't reset interrupt warning state - Ctrl+C at prompt is swallowed
-                // Only reset if we actually got input (not Ctrl+C)
-                if (userInput && userInput !== '\x03') {
+                // Reset interrupt warning state when we get valid input
+                if (userInput) {
                     this.sigintWarningShown = false;
                     this.lastSigintTime = 0;
-                }
-
-                if (userInput === '\x03') {
-                    // User cancelled with Ctrl+C
-                    continue;
                 }
 
                 const trimmedInput = userInput.trim();
@@ -283,7 +346,7 @@ export class AICoder {
                     continue;
                 }
 
-                // Handle commands first
+                // Handle commands
                 if (trimmedInput.startsWith('/')) {
                     const result = await this.commandHandler.handleCommand(trimmedInput);
                     if (result.shouldQuit) {
@@ -293,38 +356,17 @@ export class AICoder {
                     if (!result.runApiCall) {
                         continue;
                     }
-                    // If command returned a message, add it to history
                     if (result.message) {
-                        const processedMessage = expandSnippets(result.message);
-                        if (processedMessage !== result.message) {
-                            console.log(
-                                `${Config.colors.cyan}[Snippets expanded]${Config.colors.reset}`
-                            );
-                        }
-                        // Original to history/stats for consistency
-                        this.inputHandler.addToHistory(result.message);
-                        this.stats.setLastUserPrompt(result.message);
-                        // Expanded to AI
-                        this.messageHistory.addUserMessage(processedMessage);
+                        await this.addUserInput(result.message);
                     }
                 } else {
-                    const processedInput = expandSnippets(trimmedInput);
-                    if (processedInput !== trimmedInput) {
-                        console.log(
-                            `${Config.colors.cyan}[Snippets expanded]${Config.colors.reset}`
-                        );
-                    }
-                    // Original to history/stats
-                    this.inputHandler.addToHistory(trimmedInput);
-                    this.stats.setLastUserPrompt(trimmedInput);
-                    // Expanded to AI
-                    this.messageHistory.addUserMessage(processedInput);
+                    await this.addUserInput(trimmedInput);
                 }
 
                 // Process with AI (with fallback for when API is down)
                 await this.processWithAI();
             } catch (error) {
-                console.error(`${Config.colors.red}Error: ${error}${Config.colors.reset}`);
+                LogUtils.error(`Error: ${error}`);
             }
         }
 
@@ -341,40 +383,25 @@ export class AICoder {
     private async runNonInteractive(): Promise<void> {
         try {
             // Read all input from stdin
-            const chunks: Buffer[] = [];
-            for await (const chunk of process.stdin) {
-                chunks.push(chunk);
-            }
-            const userInput = Buffer.concat(chunks).toString('utf8').trim();
+            const userInput = await StreamUtils.readStdinAsString();
 
             if (!userInput) {
                 // No input, exit silently
                 return;
             }
 
-            // Handle commands first
+            // Handle commands
             if (userInput.startsWith('/')) {
                 const result = await this.commandHandler.handleCommand(userInput);
                 if (result.shouldQuit) {
                     return;
                 }
                 if (!result.runApiCall) {
-                    // Command was handled, no API call needed
                     this.stats.printStats();
                     return;
                 }
-                // If command returned a message, add it to history
                 if (result.message) {
-                    const processedMessage = expandSnippets(result.message);
-                    if (processedMessage !== result.message) {
-                        console.log(
-                            `${Config.colors.cyan}[Snippets expanded]${Config.colors.reset}`
-                        );
-                    }
-                    // Original to stats for consistency
-                    this.stats.setLastUserPrompt(result.message);
-                    // Expanded to AI
-                    this.messageHistory.addUserMessage(processedMessage);
+                    await this.addUserInput(result.message);
                 }
             } else {
                 const processedInput = expandSnippets(userInput);
@@ -390,7 +417,7 @@ export class AICoder {
             // Close persistent readline to allow clean exit
             this.inputHandler.close();
         } catch (error) {
-            console.error(`${Config.colors.red}Error: ${error}${Config.colors.reset}`);
+            LogUtils.error(`Error: ${error}`);
             this.inputHandler.close();
             process.exit(1);
         }
@@ -403,36 +430,20 @@ export class AICoder {
         this.isProcessing = true;
 
         try {
-            // Check for auto-compaction before AI request (prevents context explosion)
+            // Auto-compaction before AI request
             if (this.messageHistory.shouldAutoCompact()) {
-                console.log(
-                    `${Config.colors.yellow}*** Auto-compaction triggered during processing ***${Config.colors.reset}`
-                );
-                try {
-                    await this.messageHistory.compactMemory();
-                    console.log(
-                        `${Config.colors.green}*** Auto-compaction completed ***${Config.colors.reset}`
-                    );
-                } catch (error) {
-                    console.log(
-                        `${Config.colors.yellow}*** Auto-compaction skipped: ${error} ***${Config.colors.reset}`
-                    );
-                }
+                await this.performAutoCompaction();
             }
 
             const messages = this.messageHistory.getMessages();
 
-            if (Config.debug) {
-                console.log(
-                    `${Config.colors.yellow}*** Sending ${messages.length} messages to API${Config.colors.reset}`
-                );
-            }
+            LogUtils.debug(`*** Sending ${messages.length} messages to API`, Config.colors.yellow);
 
             // Show context bar before AI response
             console.log();
             this.contextBar.printContextBar(this.stats, this.messageHistory);
 
-            console.log(`${Config.colors.bold}${Config.colors.green}AI:${Config.colors.reset} `);
+            LogUtils.print('AI: ', { color: Config.colors.green, bold: true });
 
             let fullResponse = '';
             const accumulatedToolCalls: Map<number, ToolCall> = new Map();
@@ -454,159 +465,76 @@ export class AICoder {
                     break;
                 }
 
-                // Handle usage info
+                // Handle chunk
                 if (chunk.usage) {
                     this.streamingClient.updateTokenStats(chunk.usage);
                 }
 
-                // Handle content
-                if (chunk.choices && chunk.choices[0]) {
-                    const choice = chunk.choices[0];
+                const choice = chunk.choices?.[0];
+                if (!choice) continue;
 
-                    if (choice.delta?.content) {
-                        const content = choice.delta.content;
-                        fullResponse += content;
-                        // Process with markdown colorization
-                        const coloredContent =
-                            this.streamingClient.processWithColorization(content);
-                        // Write directly to stdout without any newline
-                        process.stdout.write(coloredContent);
+                // Content
+                if (choice.delta?.content) {
+                    fullResponse += choice.delta.content;
+                    const coloredContent = this.streamingClient.processWithColorization(
+                        choice.delta.content
+                    );
+                    process.stdout.write(coloredContent);
+                }
+
+                // Tool calls
+                if (choice.delta?.tool_calls) {
+                    for (const toolCall of choice.delta.tool_calls) {
+                        this.accumulateToolCall(toolCall, accumulatedToolCalls);
                     }
+                }
 
-                    // Handle tool calls (accumulate them)
-                    if (choice.delta?.tool_calls) {
-                        for (const toolCall of choice.delta.tool_calls) {
-                            const index = toolCall.index;
-
-                            if (accumulatedToolCalls.has(index)) {
-                                // Safely accumulate arguments only (names should come complete)
-                                const existing = accumulatedToolCalls.get(index)!;
-                                if (toolCall.function?.arguments) {
-                                    existing.function.arguments += toolCall.function.arguments;
-                                }
-                            } else {
-                                // Validate tool call has required fields
-                                if (!toolCall.function?.name) {
-                                    console.error(
-                                        `${Config.colors.red}Invalid tool call: missing function name${Config.colors.reset}`
-                                    );
-                                    continue;
-                                }
-
-                                accumulatedToolCalls.set(index, {
-                                    id: toolCall.id || `tool_call_${index}_${Date.now()}`,
-                                    type: toolCall.type || 'function',
-                                    function: {
-                                        name: toolCall.function.name,
-                                        arguments: toolCall.function?.arguments || '',
-                                    },
-                                });
-                            }
-                        }
-                    }
-
-                    if (choice.finish_reason === 'tool_calls') {
-                        process.stdout.write('\n');
-                    }
+                if (choice.finish_reason === 'tool_calls') {
+                    process.stdout.write('\n');
                 }
             }
 
-            // After streaming completes, process tool calls
-            if (accumulatedToolCalls.size > 0) {
-                const toolCalls = Array.from(accumulatedToolCalls.values());
+            // Process accumulated tool calls
+            if (accumulatedToolCalls.size === 0) {
+                this.handleEmptyResponse(fullResponse);
+                return;
+            }
 
-                // Debug: Show what we accumulated (only if debug mode)
-                if (Config.debug) {
-                    console.log(
-                        `${Config.colors.yellow}Tool calls accumulated: ${toolCalls.length}${Config.colors.reset}`
-                    );
-                    for (const tc of toolCalls) {
-                        const argsPreview = tc.function.arguments.substring(0, 100);
-                        console.log(
-                            `${Config.colors.yellow}- ${tc.function.name}: ${argsPreview}${tc.function.arguments.length > 100 ? '...' : ''}${Config.colors.reset}`
-                        );
-                    }
-                }
+            const toolCalls = Array.from(accumulatedToolCalls.values());
+            this.debugToolCalls(toolCalls);
 
-                // Validate tool calls before execution
-                const validToolCalls = toolCalls.filter((toolCall) => {
-                    if (!toolCall.function?.name || !toolCall.id) {
-                        console.error(
-                            `${Config.colors.red}Invalid tool call: missing name or id${Config.colors.reset}`
-                        );
-                        return false;
-                    }
-                    return true;
-                });
+            const validToolCalls = this.validateToolCalls(toolCalls);
+            if (validToolCalls.length === 0) {
+                LogUtils.error('No valid tool calls to execute');
+                return;
+            }
 
-                if (validToolCalls.length === 0) {
-                    console.error(
-                        `${Config.colors.red}No valid tool calls to execute${Config.colors.reset}`
-                    );
-                } else {
-                    // Add assistant message with complete tool calls
-                    this.messageHistory.addAssistantMessage({
-                        content: fullResponse || "I'll help you with that.",
-                        tool_calls: validToolCalls.map((call, index) => ({
-                            ...call,
-                            index,
-                        })) as MessageToolCall[],
-                    });
+            this.messageHistory.addAssistantMessage({
+                content: fullResponse || "I'll help you with that.",
+                tool_calls: validToolCalls.map((call, index) => ({
+                    ...call,
+                    index,
+                })) as MessageToolCall[],
+            });
 
-                    // Execute tools (with previews already shown)
-                    await this.executeToolCalls(validToolCalls);
+            await this.executeToolCalls(validToolCalls);
 
-                    // Check for auto-compaction after tool execution (prevents next turn from exploding)
-                    if (this.isProcessing && this.messageHistory.shouldAutoCompact()) {
-                        console.log(
-                            `${Config.colors.yellow}*** Auto-compaction triggered after tool execution ***${Config.colors.reset}`
-                        );
-                        try {
-                            await this.messageHistory.compactMemory();
-                            console.log(
-                                `${Config.colors.green}*** Auto-compaction completed ***${Config.colors.reset}`
-                            );
-                        } catch (error) {
-                            console.log(
-                                `${Config.colors.yellow}*** Auto-compaction skipped: ${error} ***${Config.colors.reset}`
-                            );
-                        }
-                    }
+            if (this.isProcessing && this.messageHistory.shouldAutoCompact()) {
+                await this.performAutoCompaction('after tool execution');
+            }
 
-                    // Continue conversation after tool execution (only if not interrupted)
-                    if (this.isProcessing) {
-                        try {
-                            await this.processWithAI();
-                        } catch (error) {
-                            console.error(
-                                `${Config.colors.red}AI Error: ${error}${Config.colors.reset}`
-                            );
-                        }
-                    }
-                }
-            } else {
-                // Handle empty response - this should not happen but we need to handle it gracefully
-                if (fullResponse) {
-                    // Add regular assistant response
-                    this.messageHistory.addAssistantMessage({
-                        content: fullResponse,
-                    });
-                    console.log(''); // Add newline after response
-                } else {
-                    // Empty response - add a placeholder to maintain conversation flow
-                    this.messageHistory.addAssistantMessage({
-                        content: '[No response received]',
-                    });
-                    console.log(
-                        `${Config.colors.yellow}[No response received - continuing...]${Config.colors.reset}`
-                    );
+            if (this.isProcessing) {
+                try {
+                    await this.processWithAI();
+                } catch (error) {
+                    LogUtils.error(`AI Error: ${error}`);
                 }
             }
         } catch (error) {
             this.messageHistory.addAssistantMessage({
                 content: `[AI Error: ${error instanceof Error ? error.message : String(error)}]`,
             });
-            console.error(`${Config.colors.red}AI Error: ${error}${Config.colors.reset}`);
+            LogUtils.error(`AI Error: ${error}`);
         } finally {
             this.isProcessing = false;
         }
@@ -620,43 +548,36 @@ export class AICoder {
             const { name } = toolCall.function;
             const toolDef = this.toolManager.getToolDefinition(name);
 
-            // Show tool header with cleaner format
-            console.log(`${Config.colors.yellow}[*] Tool: ${name}${Config.colors.reset}`);
+            LogUtils.print(`[*] Tool: ${name}`, { color: Config.colors.yellow });
 
-            // Always show command info, regardless of YOLO mode
-            // Show preview for file operations, formatted args for others
-            let preview = null;
+            // Tool not found
             if (!toolDef) {
-                console.log(
-                    `${Config.colors.red}[x] Tool not found: ${name}${Config.colors.reset}`
-                );
-                // Add error to message history for AI to see
+                LogUtils.print(`[x] Tool not found: ${name}`, { color: Config.colors.red });
                 this.messageHistory.addSystemMessage(`Error: Tool '${name}' does not exist.`);
                 continue;
             }
+
+            // Show tool info
+            let preview = null;
             if (toolDef.generatePreview) {
                 const args = JSON.parse(toolCall.function.arguments);
                 preview = await this.toolManager.generatePreview(name, args);
                 if (preview) {
-                    console.log(ToolFormatter.formatPreview(preview));
+                    LogUtils.print(ToolFormatter.formatPreview(preview));
                 }
-
-                // Show file path
                 if (args.path) {
-                    console.log(`Path: ${args.path}`);
+                    LogUtils.print(`Path: ${args.path}`);
                 }
             } else {
-                // Fallback to formatted arguments for non-file tools
                 const formattedArgs = this.toolManager.formatToolArguments(
                     name,
                     toolCall.function.arguments
                 );
-                console.log(formattedArgs);
+                LogUtils.print(formattedArgs);
             }
 
-            // Guard clause: Auto-reject if preview indicates operation cannot be approved
+            // Auto-reject if preview cannot be approved
             if (preview && !preview.canApprove) {
-                // Add tool result with the detailed error from preview content
                 this.messageHistory.addToolResults([
                     {
                         tool_call_id: toolCall.id,
@@ -669,53 +590,38 @@ export class AICoder {
             // Track if we should interrupt after tool execution (for guidance)
             let shouldInterruptAfterExecution = false;
 
-            // Only ask for approval if not in YOLO mode and tool requires approval
+            // Approval check
             if (!Config.yoloMode && toolDef && !toolDef.auto_approved) {
-                // Call notification hook before showing approval prompt
                 await this.callNotifyHook('onBeforeApprovalPrompt');
 
                 const approval = await this.inputHandler.prompt(
                     `${Config.colors.yellow}Approve [Y/n]: ${Config.colors.reset}`
                 );
 
-                // Empty input defaults to 'y'
                 const approvalAnswer = approval.trim().toLowerCase() || 'y';
 
-                // Handle special yolo command
+                // Handle yolo command
                 if (approvalAnswer === 'yolo') {
                     Config.setYoloMode(true);
-                    console.log(
-                        `${Config.colors.green}[*] YOLO mode ENABLED${Config.colors.reset}`
-                    );
+                    LogUtils.success('[*] YOLO mode ENABLED');
                 }
 
-                // Parse guidance and aliases
+                // Parse approval
                 const hasGuidance = approvalAnswer.endsWith('+');
                 const baseAnswer = hasGuidance ? approvalAnswer.slice(0, -1) : approvalAnswer;
 
-                // Map aliases to canonical form
                 const canonicalAnswer =
-                    baseAnswer === 'a'
-                        ? 'y'
-                        : // 'a' for allow
-                          baseAnswer === 'd'
-                          ? 'n'
-                          : // 'd' for deny
-                            baseAnswer;
+                    baseAnswer === 'a' ? 'y' : baseAnswer === 'd' ? 'n' : baseAnswer;
 
-                // Set guidance interruption flag
                 shouldInterruptAfterExecution = hasGuidance;
 
-                // Guard clause: Handle denial
+                // User denied
                 if (
                     canonicalAnswer !== 'y' &&
                     canonicalAnswer !== 'yes' &&
                     approvalAnswer !== 'yolo'
                 ) {
-                    console.log(
-                        `${Config.colors.red}[x] Tool execution cancelled.${Config.colors.reset}`
-                    );
-
+                    LogUtils.error('[x] Tool execution cancelled.');
                     this.messageHistory.addToolResults([
                         {
                             tool_call_id: toolCall.id,
@@ -723,7 +629,6 @@ export class AICoder {
                         },
                     ]);
 
-                    // Guard clause: Handle guidance interruption
                     if (shouldInterruptAfterExecution) {
                         this.isProcessing = false;
                     }
@@ -735,13 +640,13 @@ export class AICoder {
             this.messageHistory.addToolResults([result]);
 
             if (toolDef?.hide_results) {
-                console.log(`${Config.colors.green}[*] Done${Config.colors.reset}`);
+                LogUtils.success('[*] Done');
             } else {
                 // Display based on detail mode - no parsing needed
-                if (!DetailMode.enabled && result.friendly) {
-                    console.log(result.friendly);
+                if (!Config.detailMode && result.friendly) {
+                    LogUtils.print(result.friendly);
                 } else {
-                    console.log(result.content);
+                    LogUtils.print(result.content);
                 }
             }
 

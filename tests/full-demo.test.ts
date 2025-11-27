@@ -19,7 +19,6 @@ describe('Full Demo: Tool Output Formatter', () => {
         const formatted = ToolFormatter.formatForAI(output);
         expect(formatted).toContain('Path: src/app.ts');
         expect(formatted).toContain('Content: export const App = () => <div>Hello World</div>;');
-        expect(formatted).toContain('export const App = () => <div>Hello World</div>;');
     });
 
     it('should format tool output for local display with detail off', () => {

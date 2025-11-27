@@ -9,9 +9,6 @@ export class Stats {
     public apiSuccess = 0;
     public apiErrors = 0;
     public apiTimeSpent = 0;
-    public toolCalls = 0;
-    public toolErrors = 0;
-    public toolTimeSpent = 0;
     public messagesSent = 0;
     public tokensProcessed = 0;
     public compactions = 0;
@@ -50,26 +47,7 @@ export class Stats {
         this.apiTimeSpent += time;
     }
 
-    /**
-     * Increment tool calls counter
-     */
-    incrementToolCalls(): void {
-        this.toolCalls++;
-    }
 
-    /**
-     * Increment tool errors counter
-     */
-    incrementToolErrors(): void {
-        this.toolErrors++;
-    }
-
-    /**
-     * Add time to tool time spent
-     */
-    addToolTime(time: number): void {
-        this.toolTimeSpent += time;
-    }
 
     /**
      * Increment messages sent counter
@@ -137,8 +115,6 @@ export class Stats {
             `API Requests: ${this.apiRequests} (Success: ${this.apiSuccess}, Errors: ${this.apiErrors})`
         );
         console.log(`API Time Spent: ${this.apiTimeSpent.toFixed(2)}s`);
-        console.log(`Tool Calls: ${this.toolCalls} (Errors: ${this.toolErrors})`);
-        console.log(`Tool Time Spent: ${this.toolTimeSpent.toFixed(2)}s`);
         console.log(`Messages Sent: ${this.messagesSent}`);
         console.log(`Tokens Processed: ${this.tokensProcessed.toLocaleString()}`);
         console.log(`Prompt Tokens: ${this.promptTokens.toLocaleString()}`);
@@ -161,9 +137,6 @@ export class Stats {
         this.apiSuccess = 0;
         this.apiErrors = 0;
         this.apiTimeSpent = 0;
-        this.toolCalls = 0;
-        this.toolErrors = 0;
-        this.toolTimeSpent = 0;
         this.messagesSent = 0;
         this.tokensProcessed = 0;
         this.compactions = 0;

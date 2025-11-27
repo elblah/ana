@@ -1,5 +1,6 @@
 import { BaseCommand, type CommandResult } from './base.js';
 import { Config } from '../config.js';
+import { LogUtils } from '../../utils/log-utils.js';
 import { PRUNED_TOOL_MESSAGE } from '../message-history.js';
 
 interface CompactArgs {
@@ -45,12 +46,8 @@ export class CompactCommand extends BaseCommand {
             if (parsed.prune !== 'all' && parsed.prune !== 'stats') {
                 parsed.count = Number.parseInt(parsed.prune);
                 if (isNaN(parsed.count) || parsed.count < 1) {
-                    console.log(
-                        `${Config.colors.red}[X] Invalid prune count: ${parsed.prune}${Config.colors.reset}`
-                    );
-                    console.log(
-                        `${Config.colors.yellow}[i] Usage: ${this.usage}${Config.colors.reset}`
-                    );
+                    LogUtils.error(`[X] Invalid prune count: ${parsed.prune}`);
+                    LogUtils.warn(`[i] Usage: ${this.usage}`);
                     return {} as CompactArgs;
                 }
             }
@@ -61,10 +58,8 @@ export class CompactCommand extends BaseCommand {
         } else if (command === 'help') {
             this.showHelp();
         } else {
-            console.log(
-                `${Config.colors.red}[X] Unknown compact command: ${command}${Config.colors.reset}`
-            );
-            console.log(`${Config.colors.yellow}[i] Usage: ${this.usage}${Config.colors.reset}`);
+            LogUtils.error(`[X] Unknown compact command: ${command}`);
+            LogUtils.warn(`[i] Usage: ${this.usage}`);
         }
 
         return parsed;
@@ -89,26 +84,22 @@ export class CompactCommand extends BaseCommand {
 
         // Normal auto-compaction
         if (!Config.autoCompactEnabled) {
-            console.log(
-                `${Config.colors.yellow}[i] Auto-compaction is disabled${Config.colors.reset}`
-            );
+            LogUtils.warn(`[i] Auto-compaction is disabled`);
             return;
         }
 
         if (rounds === 0) {
-            console.log(
-                `${Config.colors.yellow}[i] No messages available to compact${Config.colors.reset}`
-            );
+            LogUtils.warn(`[i] No messages available to compact`);
             return;
         }
 
         const percentage = threshold > 0 ? (currentTokens / threshold) * 100 : 0;
         if (percentage < 80) {
-            console.log(
-                `${Config.colors.yellow}[i] Auto-compaction not needed (${percentage.toFixed(1)}% of ${threshold.toLocaleString()} tokens)${Config.colors.reset}`
+            LogUtils.warn(
+                `[i] Auto-compaction not needed (${percentage.toFixed(1)}% of ${threshold.toLocaleString()} tokens)`
             );
-            console.log(
-                `${Config.colors.yellow}[i] Current conversation: ${rounds} rounds (user + assistant exchanges)${Config.colors.reset}`
+            LogUtils.warn(
+                `[i] Current conversation: ${rounds} rounds (user + assistant exchanges)`
             );
             return;
         }
@@ -116,9 +107,7 @@ export class CompactCommand extends BaseCommand {
         try {
             await messageHistory.compactMemory();
         } catch (error) {
-            console.log(
-                `${Config.colors.red}[X] Compaction failed: ${error}${Config.colors.reset}`
-            );
+            LogUtils.error(`[X] Compaction failed: ${error}`);
         }
     }
 
@@ -130,14 +119,14 @@ export class CompactCommand extends BaseCommand {
         const rounds = messageHistory.getRoundCount();
         const percentage = threshold > 0 ? (currentTokens / threshold) * 100 : 0;
 
-        console.log(`${Config.colors.cyan}Conversation Statistics:${Config.colors.reset}`);
-        console.log(`  Rounds (user+assistant): ${rounds}`);
-        console.log(`  Messages (total): ${messageHistory.getMessageCount()}`);
-        console.log(
+        LogUtils.print(`Conversation Statistics:`, { color: Config.colors.cyan });
+        LogUtils.print(`  Rounds (user+assistant): ${rounds}`);
+        LogUtils.print(`  Messages (total): ${messageHistory.getMessageCount()}`);
+        LogUtils.print(
             `  Token usage: ${currentTokens.toLocaleString()} / ${threshold.toLocaleString()} (${percentage.toFixed(1)}%)`
         );
-        console.log(`  Auto-compaction: ${Config.autoCompactEnabled ? 'enabled' : 'disabled'}`);
-        console.log(`  Total compactions: ${messageHistory.getCompactionCount()}`);
+        LogUtils.print(`  Auto-compaction: ${Config.autoCompactEnabled ? 'enabled' : 'disabled'}`);
+        LogUtils.print(`  Total compactions: ${messageHistory.getCompactionCount()}`);
 
         return {} as CompactArgs; // Return to satisfy type
     }
@@ -150,15 +139,15 @@ export class CompactCommand extends BaseCommand {
         const stats = messageHistory.getToolCallStats();
 
         if (args.prune === 'stats') {
-            console.log(`${Config.colors.cyan}Tool Call Statistics:${Config.colors.reset}`);
-            console.log(`  Tool results: ${stats.count}`);
-            console.log(`  Estimated tokens: ${stats.tokens.toLocaleString()}`);
-            console.log(`  Total bytes: ${stats.bytes.toLocaleString()}`);
+            LogUtils.print(`Tool Call Statistics:`, { color: Config.colors.cyan });
+            LogUtils.print(`  Tool results: ${stats.count}`);
+            LogUtils.print(`  Estimated tokens: ${stats.tokens.toLocaleString()}`);
+            LogUtils.print(`  Total bytes: ${stats.bytes.toLocaleString()}`);
 
             if (stats.count > 0) {
                 const avgBytes = Math.round(stats.bytes / stats.count);
                 const avgTokens = Math.round(stats.tokens / stats.count);
-                console.log(`  Average per result: ${avgBytes} bytes, ${avgTokens} tokens`);
+                LogUtils.print(`  Average per result: ${avgBytes} bytes, ${avgTokens} tokens`);
             }
 
             return {} as CompactArgs;
@@ -168,53 +157,49 @@ export class CompactCommand extends BaseCommand {
         const pruneCount = pruneAll ? 0 : args.count || 1;
 
         if (stats.count === 0) {
-            console.log(
-                `${Config.colors.yellow}[i] No tool results to prune${Config.colors.reset}`
-            );
+            LogUtils.warn(`[i] No tool results to prune`);
             return {} as CompactArgs;
         }
 
         if (pruneAll) {
             const prunedCount = messageHistory.pruneAllToolResults();
-            console.log(
-                `${Config.colors.green}[✓] Pruned ${prunedCount} tool result(s)${Config.colors.reset}`
-            );
+            LogUtils.success(`[✓] Pruned ${prunedCount} tool result(s)`);
         } else {
             const toPrune = Math.min(pruneCount, stats.count);
             const prunedCount = messageHistory.pruneOldestToolResults(toPrune);
-            console.log(
-                `${Config.colors.green}[✓] Pruned ${prunedCount} oldest tool result(s)${Config.colors.reset}`
-            );
+            LogUtils.success(`[✓] Pruned ${prunedCount} oldest tool result(s)`);
         }
 
         return {} as CompactArgs;
     }
 
     private showHelp(): CompactArgs {
-        console.log(`${Config.colors.cyan}Compact Command Help:${Config.colors.reset}`);
-        console.log(`  ${this.usage}`);
-        console.log(``);
-        console.log(`  Commands:`);
-        console.log(`    /compact                    Try auto-compaction`);
-        console.log(`    /compact force <N>           Force compact N oldest rounds`);
-        console.log(`    /compact force-messages <N>   Force compact N oldest individual messages`);
-        console.log(`    /compact prune all           Prune all tool call results`);
-        console.log(`    /compact prune stats         Show tool call statistics`);
-        console.log(`    /compact prune <N>           Prune N oldest tool call results`);
-        console.log(`    /compact stats               Show conversation statistics`);
-        console.log(`    /compact help                Show this help`);
-        console.log(``);
-        console.log(`  Examples:`);
-        console.log(`    /compact force 3            Compact 3 oldest rounds`);
-        console.log(`    /compact force-messages 15   Compact 15 oldest messages`);
-        console.log(`    /compact prune all           Clear all tool results`);
-        console.log(`    /compact prune 5             Clear 5 oldest tool results`);
-        console.log(`    /compact prune stats         Show tool call stats`);
-        console.log(``);
-        console.log(`  Definitions:`);
-        console.log(`    Round = User + Assistant response (with tool calls)`);
-        console.log(`    Message = Individual message (user, assistant, or tool)`);
-        console.log(`    Prune = Replace tool result content with "${PRUNED_TOOL_MESSAGE}"`);
+        LogUtils.print(`Compact Command Help:`, { color: Config.colors.cyan });
+        LogUtils.print(`  ${this.usage}`);
+        LogUtils.print(`  `);
+        LogUtils.print(`  Commands:`);
+        LogUtils.print(`    /compact                    Try auto-compaction`);
+        LogUtils.print(`    /compact force <N>           Force compact N oldest rounds`);
+        LogUtils.print(
+            `    /compact force-messages <N>   Force compact N oldest individual messages`
+        );
+        LogUtils.print(`    /compact prune all           Prune all tool call results`);
+        LogUtils.print(`    /compact prune stats         Show tool call statistics`);
+        LogUtils.print(`    /compact prune <N>           Prune N oldest tool call results`);
+        LogUtils.print(`    /compact stats               Show conversation statistics`);
+        LogUtils.print(`    /compact help                Show this help`);
+        LogUtils.print(`  `);
+        LogUtils.print(`  Examples:`);
+        LogUtils.print(`    /compact force 3            Compact 3 oldest rounds`);
+        LogUtils.print(`    /compact force-messages 15   Compact 15 oldest messages`);
+        LogUtils.print(`    /compact prune all           Clear all tool results`);
+        LogUtils.print(`    /compact prune 5             Clear 5 oldest tool results`);
+        LogUtils.print(`    /compact prune stats         Show tool call stats`);
+        LogUtils.print(`  `);
+        LogUtils.print(`  Definitions:`);
+        LogUtils.print(`    Round = User + Assistant response (with tool calls)`);
+        LogUtils.print(`    Message = Individual message (user, assistant, or tool)`);
+        LogUtils.print(`    Prune = Replace tool result content with "${PRUNED_TOOL_MESSAGE}"`);
 
         return {} as CompactArgs; // Return to satisfy type
     }

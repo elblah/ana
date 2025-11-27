@@ -1,4 +1,5 @@
 ## IMPORTANT
+- use proper types (never use any)
 - **ALL IMPORTS MUST be made on the TOP of the file NO EXCEPTION**: **NEVER** import or require in methods
 - **investigate the code before answering the user NEVER GUESS**
 - readability is a MUST (don't overcomplicate)

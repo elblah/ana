@@ -3,8 +3,8 @@
  */
 
 import { BaseCommand, type CommandResult, type CommandContext } from './base.js';
-import { DetailMode } from '../detail-mode.js';
 import { Config } from '../config.js';
+import { LogUtils } from '../../utils/log-utils.js';
 
 export class DetailCommand extends BaseCommand {
     protected name = 'detail';
@@ -15,49 +15,44 @@ export class DetailCommand extends BaseCommand {
     }
 
     execute(args: string[]): CommandResult {
-        const status = DetailMode.getStatusText();
-        const statusColor = DetailMode.enabled ? Config.colors.green : Config.colors.yellow;
+        const status = Config.detailMode ? 'ENABLED' : 'DISABLED';
+        const statusColor = Config.detailMode ? Config.colors.green : Config.colors.yellow;
 
         if (args.length === 0) {
             // Show status
-            console.log(
-                `${Config.colors.bold}Detail Mode Status:${Config.colors.reset} ${statusColor}${status}${Config.colors.reset}`
-            );
+            LogUtils.print(`Detail Mode Status: ${status}`, {
+                color: statusColor,
+                bold: true,
+            });
 
-            if (DetailMode.enabled) {
-                console.log(
-                    `${Config.colors.green}All tool parameters and results will be shown${Config.colors.reset}`
-                );
-                console.log(
-                    `${Config.colors.cyan}Use Ctrl+Z or /detail off to switch to simple mode${Config.colors.reset}`
-                );
+            if (Config.detailMode) {
+                LogUtils.success('All tool parameters and results will be shown');
+                LogUtils.print('Use Ctrl+Z or /detail off to switch to simple mode', {
+                    color: Config.colors.cyan,
+                });
             } else {
-                console.log(
-                    `${Config.colors.yellow}Only important tool information will be shown${Config.colors.reset}`
-                );
-                console.log(
-                    `${Config.colors.cyan}Use Ctrl+Z or /detail on to switch to detailed mode${Config.colors.reset}`
-                );
+                LogUtils.warn('Only important tool information will be shown');
+                LogUtils.print('Use Ctrl+Z or /detail on to switch to detailed mode', {
+                    color: Config.colors.cyan,
+                });
             }
 
-            console.log(
-                `${Config.colors.dim}Quick toggle: Ctrl+Z | Command: /detail [on|off]${Config.colors.reset}`
-            );
+            LogUtils.print('Quick toggle: Ctrl+Z | Command: /detail [on|off]', {
+                color: Config.colors.dim,
+            });
             return { shouldQuit: false, runApiCall: false };
         }
 
         const action = args[0].toLowerCase();
         if (action === 'on' || action === '1' || action === 'enable' || action === 'true') {
-            if (DetailMode.enabled) {
-                console.log(
-                    `${Config.colors.yellow}[*] Detail mode is already enabled${Config.colors.reset}`
-                );
+            if (Config.detailMode) {
+                LogUtils.warn(`[*] Detail mode is already enabled`);
             } else {
-                DetailMode.enable();
-                console.log(`${Config.colors.green}[*] Detail mode ENABLED${Config.colors.reset}`);
-                console.log(
-                    `${Config.colors.cyan}All tool parameters and results will now be shown${Config.colors.reset}`
-                );
+                Config.detailMode = true;
+                LogUtils.success('[*] Detail mode ENABLED');
+                LogUtils.print('All tool parameters and results will now be shown', {
+                    color: Config.colors.cyan,
+                });
             }
         } else if (
             action === 'off' ||
@@ -65,53 +60,37 @@ export class DetailCommand extends BaseCommand {
             action === 'disable' ||
             action === 'false'
         ) {
-            if (DetailMode.enabled) {
-                DetailMode.disable();
-                console.log(
-                    `${Config.colors.yellow}[*] Detail mode DISABLED${Config.colors.reset}`
-                );
-                console.log(
-                    `${Config.colors.cyan}Only important tool information will be shown${Config.colors.reset}`
-                );
+            if (Config.detailMode) {
+                Config.detailMode = false;
+                LogUtils.warn('[*] Detail mode DISABLED');
+                LogUtils.print('Only important tool information will be shown', {
+                    color: Config.colors.cyan,
+                });
             } else {
-                console.log(
-                    `${Config.colors.yellow}[*] Detail mode is already disabled${Config.colors.reset}`
-                );
+                LogUtils.warn('[*] Detail mode is already disabled');
             }
         } else if (action === 'toggle') {
-            const newState = DetailMode.toggle();
-            const newStatus = DetailMode.getStatusText();
+            Config.detailMode = !Config.detailMode;
+            const newStatus = Config.detailMode ? 'ENABLED' : 'DISABLED';
 
-            if (newState) {
-                console.log(`${Config.colors.green}[*] Detail mode ENABLED${Config.colors.reset}`);
-                console.log(
-                    `${Config.colors.cyan}All tool parameters and results will now be shown${Config.colors.reset}`
-                );
+            if (Config.detailMode) {
+                LogUtils.success(`[*] Detail mode ENABLED`);
+                LogUtils.print('All tool parameters and results will now be shown', {
+                    color: Config.colors.cyan,
+                });
             } else {
-                console.log(
-                    `${Config.colors.yellow}[*] Detail mode DISABLED${Config.colors.reset}`
-                );
-                console.log(
-                    `${Config.colors.cyan}Only important tool information will be shown${Config.colors.reset}`
-                );
+                LogUtils.warn(`[*] Detail mode DISABLED`);
+                LogUtils.print('Only important tool information will be shown', {
+                    color: Config.colors.cyan,
+                });
             }
         } else {
-            console.log(
-                `${Config.colors.red}Invalid argument. Use: /detail [on|off|toggle]${Config.colors.reset}`
-            );
-            console.log(
-                `${Config.colors.dim}  /detail - Show current status${Config.colors.reset}`
-            );
-            console.log(
-                `${Config.colors.dim}  /detail on - Enable detailed output${Config.colors.reset}`
-            );
-            console.log(
-                `${Config.colors.dim}  /detail off - Disable detailed output${Config.colors.reset}`
-            );
-            console.log(
-                `${Config.colors.dim}  /detail toggle - Toggle current state${Config.colors.reset}`
-            );
-            console.log(`${Config.colors.dim}  Ctrl+Z - Quick toggle${Config.colors.reset}`);
+            LogUtils.error('Invalid argument. Use: /detail [on|off|toggle]');
+            LogUtils.print('  /detail - Show current status', { color: Config.colors.dim });
+            LogUtils.print('  /detail on - Enable detailed output', { color: Config.colors.dim });
+            LogUtils.print('  /detail off - Disable detailed output', { color: Config.colors.dim });
+            LogUtils.print('  /detail toggle - Toggle current state', { color: Config.colors.dim });
+            LogUtils.print('  Ctrl+Z - Quick toggle', { color: Config.colors.dim });
         }
 
         return { shouldQuit: false, runApiCall: false };

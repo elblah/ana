@@ -103,6 +103,15 @@ export class Config {
     }
 
     private static _sandboxDisabled = false;
+    private static _detailMode = false;
+
+    static get detailMode(): boolean {
+        return this._detailMode;
+    }
+
+    static set detailMode(enabled: boolean) {
+        this._detailMode = enabled;
+    }
 
     static get sandboxDisabled(): boolean {
         // Check both environment variable and runtime state
@@ -214,5 +223,15 @@ export class Config {
                 `${this.colors.green}  Auto-compaction enabled (context: ${this.contextSize} tokens, triggers at ${this.contextCompactPercentage}%)${this.colors.reset}`
             );
         }
+    }
+
+    /**
+     * Reset all runtime state to defaults (for testing)
+     * Restores all mutable static properties to their initial values
+     */
+    static reset(): void {
+        this._yoloMode = false;
+        this._sandboxDisabled = false;
+        this._detailMode = false;
     }
 }

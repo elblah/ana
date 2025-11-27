@@ -1,0 +1,3 @@
+<system_message>
+Just acknowledge that you understand what is being said and stop. Do not proceed with further actions until the user asks for it.
+</system_message>

@@ -250,14 +250,14 @@ describe('Tool Argument Formatters', () => {
             const args = { path: 'src/' };
             const formatted = toolManager.formatToolArguments('list_directory', args);
 
-            expect(formatted).toBe('Path: src/');
+            expect(formatted).toBe('Listing directory: src/');
         });
 
         it('should use default for empty path', () => {
             const args = {};
             const formatted = toolManager.formatToolArguments('list_directory', args);
 
-            expect(formatted).toBe('Path: .');
+            expect(formatted).toBe('Listing current directory');
         });
     });
 

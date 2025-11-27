@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
-import { FileUtils } from '../src/core/file-utils.js';
+import { FileUtils } from '../src/utils/file-utils.js';
 import { TOOL_DEFINITION as WRITE_FILE_TOOL } from '../src/tools/internal/write-file.js';
 import { TOOL_DEFINITION as EDIT_FILE_TOOL } from '../src/tools/internal/edit-file.js';
 
@@ -34,7 +34,7 @@ describe('No changes approval logic', () => {
             });
 
             expect(preview).not.toBeNull();
-            expect(preview?.content).toContain('No changes - file content is identical');
+            expect(preview?.content).toContain('No changes - content is identical');
             expect(preview?.canApprove).toBe(false);
         });
 

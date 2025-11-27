@@ -87,7 +87,7 @@ export type UnknownError = unknown;
 // Readline interface types
 export interface ReadlineInterface {
     on(event: 'SIGINT' | 'SIGTSTP', callback: () => void): void;
-    on(event: string, callback: (...args: any[]) => void): void;
+    on(event: string, callback: (...args: unknown[]) => void): void;
     close(): void;
     prompt(): void;
     write(data: string): void;

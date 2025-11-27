@@ -3,15 +3,19 @@
  */
 
 import { Config } from './config.js';
-import { DetailMode } from './detail-mode.js';
+import { LogUtils } from '../utils/log-utils.js';
 import { createInterface } from 'node:readline';
-import { TempUtils } from './temp-utils.js';
+import { TempFileUtils } from '../utils/temp-file-utils.js';
 import type { Stats } from './stats.js';
 import { PromptHistory } from './prompt-history.js';
 import { ContextBar } from './context-bar.js';
 import { getSnippetNames } from './snippet-utils.js';
 import type { ReadlineInterface, CompletionCallback } from './types.js';
 import type { MessageHistory } from './message-history.js';
+import { DateTimeUtils } from '../utils/datetime-utils.js';
+import { JsonUtils } from '../utils/json-utils.js';
+import { ShellUtils } from '../utils/shell-utils.js';
+import { FileUtils } from '../utils/file-utils.js';
 
 export class InputHandler {
     private history: string[] = [];
@@ -65,9 +69,8 @@ export class InputHandler {
             this.rl.history = this.history;
         }
 
-        // CRITICAL: Capture SIGINT from persistent readline to prevent bubbling to firejail
+        // Forward SIGINT to global handler
         this.rl!.on('SIGINT', () => {
-            // Forward to global handler
             process.emit('SIGINT');
         });
 
@@ -80,12 +83,10 @@ export class InputHandler {
                 // In tmux: show the menu and don't suspend
                 await this.showTmuxPopupMenu();
             } else {
-                // Not in tmux: toggle detail mode and don't suspend
-                const newState = DetailMode.toggle();
-                const status = DetailMode.getStatusText();
-                const color = newState ? Config.colors.green : Config.colors.yellow;
-
-                console.log(`\n${color}[*] Detail mode ${status}${Config.colors.reset}`);
+                // Not in tmux: just tell them about tmux features
+                LogUtils.print('\n[*] Use tmux for enhanced features (Ctrl+Z menu, detail mode toggle, etc.)', {
+                    color: Config.colors.cyan,
+                });
             }
             // By handling the event in the readline interface, we prevent the default suspend behavior
         });
@@ -109,7 +110,7 @@ export class InputHandler {
     /**
      * Get input from user - single line
      */
-    async getMultilineInput(): Promise<string> {
+    async getUserInput(): Promise<string> {
         return new Promise((resolve) => {
             // Show context bar before user prompt (if available)
             if (this.contextBar && this.stats && this.messageHistory) {
@@ -135,7 +136,7 @@ export class InputHandler {
      */
     private async showTmuxPopupMenu(): Promise<void> {
         // Create a temporary file for IPC
-        const tempFile = TempUtils.createTempFile('aicoder-menu', '.txt');
+        const tempFile = TempFileUtils.createTempFile('aicoder-menu', '.txt');
 
         try {
             // Build the tmux display-menu command
@@ -149,8 +150,7 @@ export class InputHandler {
         "Quit" "q" "run-shell 'echo q > ${tempFile}'"`;
 
             // Execute the tmux command to show the menu
-            const proc = Bun.spawn(['sh', '-c', tmuxCommand]);
-            await proc.exited;
+            const result = await ShellUtils.executeCommand(tmuxCommand);
 
             // Wait for the temp file to be created and read the selection
             let selection = '';
@@ -160,9 +160,9 @@ export class InputHandler {
             while (Date.now() - startTime < maxWaitTime) {
                 try {
                     // Check if file exists and has content
-                    const fileExists = await Bun.file(tempFile).exists();
-                    if (fileExists) {
-                        selection = await Bun.file(tempFile).text();
+                    const content = await FileUtils.readFile(tempFile);
+                    if (content) {
+                        selection = content;
                         selection = selection.trim();
                         if (selection) {
                             break;
@@ -170,39 +170,27 @@ export class InputHandler {
                     }
                 } catch (error) {
                     // File might not exist yet, continue waiting
-                    console.log('error', error);
+                    LogUtils.debug(`Temp menu file not ready: ${(error as Error).message}`);
                 }
 
                 await new Promise((resolve) => setTimeout(resolve, 100));
             }
 
             // Clean up the temp file
-            try {
-                await Bun.$`rm -f ${tempFile}`;
-            } catch (error) {
-                // Ignore cleanup errors
-            }
+            TempFileUtils.deleteFile(tempFile);
 
             // Process the selection
             if (selection) {
                 await this.processMenuSelection(selection);
             } else {
                 // Timeout occurred
-                if (Config.debug) {
-                    console.log(`\n${Config.colors.dim}[Menu timeout]${Config.colors.reset}`);
-                }
+                LogUtils.debug(`\n[Menu timeout]`, Config.colors.dim);
             }
         } catch (error) {
             // If anything goes wrong, clean up and show error
-            try {
-                await Bun.$`rm -f ${tempFile}`;
-            } catch (cleanupError) {
-                // Ignore cleanup errors
-            }
+            TempFileUtils.deleteFile(tempFile);
 
-            console.log(
-                `\n${Config.colors.red}[Menu error: ${(error as Error).message}]${Config.colors.reset}`
-            );
+            LogUtils.error(`\n[Menu error: ${(error as Error).message}]`);
         }
     }
 
@@ -249,17 +237,17 @@ export class InputHandler {
      * Toggle detail mode
      */
     private handleToggleDetail(): void {
-        const newState = DetailMode.toggle();
-        const status = DetailMode.getStatusText();
-        const color = newState ? Config.colors.green : Config.colors.yellow;
-        console.log(`\n${color}[*] Detail mode ${status}${Config.colors.reset}`);
+        Config.detailMode = !Config.detailMode;
+        const status = Config.detailMode ? 'ENABLED' : 'DISABLED';
+        const color = Config.detailMode ? Config.colors.green : Config.colors.yellow;
+        LogUtils.print(`\n[*] Detail mode ${status}`, { color });
     }
 
     /**
      * Stop processing by emitting SIGINT
      */
     private handleStopProcessing(): void {
-        console.log(`\n${Config.colors.yellow}[*] Stopping processing...${Config.colors.reset}`);
+        LogUtils.warn('\n[*] Stopping processing...');
         process.emit('SIGINT');
     }
 
@@ -270,8 +258,9 @@ export class InputHandler {
         const newYoloState = !Config.yoloMode;
         Config.setYoloMode(newYoloState);
         const yoloStatus = newYoloState ? 'ENABLED' : 'DISABLED';
-        const yoloColor = newYoloState ? Config.colors.green : Config.colors.red;
-        console.log(`\n${yoloColor}[*] YOLO mode ${yoloStatus}${Config.colors.reset}`);
+        LogUtils.print(`\n[*] YOLO mode ${yoloStatus}`, {
+            color: newYoloState ? Config.colors.green : Config.colors.red,
+        });
     }
 
     /**
@@ -279,9 +268,7 @@ export class InputHandler {
      */
     private handlePruneContext(): void {
         if (!this.messageHistory) {
-            console.log(
-                `\n${Config.colors.cyan}[*] Prune: context not available${Config.colors.reset}`
-            );
+            LogUtils.print(`\n[*] Prune: context not available`, { color: Config.colors.cyan });
             return;
         }
 
@@ -289,26 +276,22 @@ export class InputHandler {
         const result = this.messageHistory.pruneToolResultsByPercentage(percentage);
 
         if (result.prunedCount === 0 && result.protectedCount === 0) {
-            console.log(
-                `\n${Config.colors.yellow}[*] No tool results to prune${Config.colors.reset}`
-            );
+            LogUtils.warn(`\n[*] No tool results to prune`);
             return;
         }
 
         if (result.prunedCount === 0) {
-            console.log(
-                `\n${Config.colors.yellow}[*] All tool results are protected (≤256 bytes)${Config.colors.reset}`
-            );
+            LogUtils.warn(`\n[*] All tool results are protected (≤256 bytes)`);
             return;
         }
 
-        console.log(
-            `\n${Config.colors.green}[*] Pruned ${result.prunedCount} tool results (${percentage}%), saved ${result.savedBytes.toLocaleString()} bytes${Config.colors.reset}`
+        LogUtils.success(
+            `\n[*] Pruned ${result.prunedCount} tool results (${percentage}%), saved ${result.savedBytes.toLocaleString()} bytes`
         );
         if (result.protectedCount > 0) {
-            console.log(
-                `\n${Config.colors.dim}    (Protected ${result.protectedCount} tool results ≤ 256 bytes)${Config.colors.reset}`
-            );
+            LogUtils.print(`\n    (Protected ${result.protectedCount} tool results ≤ 256 bytes)`, {
+                color: Config.colors.dim,
+            });
         }
     }
 
@@ -319,9 +302,7 @@ export class InputHandler {
         if (this.stats) {
             this.stats.printStats();
         } else {
-            console.log(
-                `\n${Config.colors.cyan}[*] Stats: context not available${Config.colors.reset}`
-            );
+            LogUtils.print(`\n[*] Stats: context not available`, { color: Config.colors.cyan });
         }
     }
 
@@ -330,24 +311,19 @@ export class InputHandler {
      */
     private async handleSaveSession(): Promise<void> {
         if (!this.messageHistory) {
-            console.log(
-                `\n${Config.colors.cyan}[*] Session save: context not available${Config.colors.reset}`
-            );
+            LogUtils.print(`\n[*] Session save: context not available`, {
+                color: Config.colors.cyan,
+            });
             return;
         }
 
-        const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-        const filename = `session-${timestamp}.json`;
+        const filename = DateTimeUtils.createTimestampFilename('session', '.json');
         try {
             const sessionData = this.messageHistory.getMessages();
-            await Bun.write(filename, JSON.stringify(sessionData, null, 2));
-            console.log(
-                `\n${Config.colors.green}[*] Session saved to ${filename}${Config.colors.reset}`
-            );
+            await JsonUtils.writeFile(filename, sessionData as unknown);
+            LogUtils.success(`\n[*] Session saved to ${filename}`);
         } catch (error) {
-            console.log(
-                `\n${Config.colors.red}[*] Error saving session: ${error}${Config.colors.reset}`
-            );
+            LogUtils.error(`\n[*] Error saving session: ${error}`);
         }
     }
 
@@ -355,7 +331,7 @@ export class InputHandler {
      * Quit the application
      */
     private handleQuit(): void {
-        console.log(`\n${Config.colors.yellow}[*] Quitting...${Config.colors.reset}`);
+        LogUtils.warn(`\n[*] Quitting...`);
         if (this.stats) {
             this.stats.printStats();
         }
@@ -366,7 +342,7 @@ export class InputHandler {
      * Handle unknown menu selection
      */
     private handleUnknownSelection(): void {
-        console.log(`\n${Config.colors.dim}[Unknown selection]${Config.colors.reset}`);
+        LogUtils.print(`\n[Unknown selection]`, { color: Config.colors.dim });
     }
 
     /**

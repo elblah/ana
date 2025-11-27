@@ -1,10 +1,10 @@
 /**
- * Run shell command internal tool implementation using native Bun functions
+ * Run shell command internal tool implementation using cross-platform ShellUtils
  */
 
-import type { Stats } from '../../core/stats.js';
 import { Config } from '../../core/config.js';
 import { ToolFormatter, type ToolOutput } from '../../core/tool-formatter.js';
+import { ShellUtils, type ShellResult } from '../../utils/shell-utils.js';
 import type { ToolExecutionArgs } from '../../core/types.js';
 
 export interface RunShellCommandParams {
@@ -17,9 +17,9 @@ export const TOOL_DEFINITION = {
     type: 'internal' as const,
     auto_approved: false,
     approval_excludes_arguments: false,
-    approval_key_exclude_arguments: [],
+    approval_key_exclude_arguments: [] as string[],
     hide_results: false,
-    description: 'Executes a shell command and returns its output.',
+    description: 'Executes a shell (BASH) command and returns its output.',
     parameters: {
         type: 'object',
         properties: {
@@ -28,223 +28,94 @@ export const TOOL_DEFINITION = {
                 description: 'The shell command to execute.',
             },
             timeout: {
-                type: 'integer',
-                description:
-                    'Timeout in seconds (default: 30). Set to a higher value for long-running commands.',
+                type: 'number',
+                description: 'Timeout in seconds (default: 30)',
                 default: 30,
-                minimum: 1,
             },
             reason: {
                 type: 'string',
-                description: 'Optional reason for running the command.',
+                description: 'Reason for running this command (for logging)',
             },
         },
         required: ['command'],
-        additionalProperties: false,
+    },
+    validateArguments: (args: ToolExecutionArgs): void => {
+        const { command } = args as unknown as RunShellCommandParams;
+        if (!command || typeof command !== 'string') {
+            throw new Error('run_shell_command requires "command" argument (string)');
+        }
     },
     formatArguments: (args: ToolExecutionArgs): string => {
-        const { command, timeout, reason } = args as unknown as RunShellCommandParams;
+        const { command, timeout = 30, reason } = args as unknown as RunShellCommandParams;
         const lines: string[] = [];
         lines.push(`Command: ${command}`);
+
         if (reason) {
             lines.push(`Reason: ${reason}`);
         }
-        if (timeout !== undefined && timeout !== 30) {
+
+        if (timeout !== 30) {
             lines.push(`Timeout: ${timeout}s`);
         }
+
         return lines.join('\n');
     },
-};
+    execute: executeRunShellCommand,
+} as const;
 
-/**
- * Execute shell command operation
- */
 export async function executeRunShellCommand(
-    params: RunShellCommandParams,
-    stats: Stats
+    args: ToolExecutionArgs
 ): Promise<ToolOutput> {
-    const startTime = Date.now();
-    const { command, timeout = 30, reason } = params;
+    const params = args as unknown as RunShellCommandParams;
+    const { command, timeout = 30, reason = 'Command execution' } = params;
 
     try {
-        let stdout: string;
-        let stderr: string;
-        let exitCode: number;
-        let timedOut = false;
+        let result: ShellResult;
 
-        if (typeof Bun !== 'undefined') {
-            // Use Bun.spawn
-            const proc = Bun.spawn(['sh', '-c', command], {
-                stdout: 'pipe',
-                stderr: 'pipe',
-                env: process.env,
-            });
-
-            // Set up timeout with race condition
-            const timeoutPromise = new Promise<never>((_, reject) => {
-                const timeoutId = setTimeout(() => {
-                    proc.kill();
-                    timedOut = true;
-                    reject(new Error(`Command timed out after ${timeout} seconds`));
-                }, timeout * 1000);
-
-                // Clear timeout if command completes normally
-                Promise.race([
-                    proc.exited,
-                    new Promise((resolve) => setTimeout(resolve, timeout * 1000)),
-                ]).then(() => clearTimeout(timeoutId));
-            });
-
-            try {
-                [stdout, stderr] = await Promise.race([
-                    Promise.all([
-                        new Response(proc.stdout).text(),
-                        new Response(proc.stderr).text(),
-                    ]),
-                    timeoutPromise,
-                ]);
-                exitCode = await proc.exited;
-            } catch (error: unknown) {
-                if (timedOut) {
-                    throw error;
-                }
-                proc.kill();
-                throw error;
-            }
+        if (timeout > 0) {
+            result = await ShellUtils.executeCommandWithTimeout(command, timeout);
         } else {
-            // Use Node.js child_process with proper timeout
-            const { spawn } = await import('node:child_process');
-            const proc = spawn('sh', ['-c', command], {
-                env: process.env,
-                detached: true, // Allow proper process group management
-            });
-
-            // Set up timeout with race condition
-            const timeoutPromise = new Promise<never>((_, reject) => {
-                const timeoutId = setTimeout(() => {
-                    process.kill(-proc.pid!, 'SIGTERM'); // Kill negative PID = process group
-                    timedOut = true;
-                    reject(new Error(`Command timed out after ${timeout} seconds`));
-                }, timeout * 1000);
-
-                // Clear timeout if command completes normally
-                const clearTimer = () => clearTimeout(timeoutId);
-                proc.on('close', clearTimer);
-                proc.on('error', clearTimer);
-            });
-
-            try {
-                [stdout, stderr] = await Promise.race([
-                    Promise.all([
-                        new Promise<string>((resolve, reject) => {
-                            let data = '';
-                            proc.stdout?.on('data', (chunk) => (data += chunk));
-                            proc.stdout?.on('end', () => resolve(data));
-                            proc.stdout?.on('error', reject);
-                        }),
-                        new Promise<string>((resolve, reject) => {
-                            let data = '';
-                            proc.stderr?.on('data', (chunk) => (data += chunk));
-                            proc.stderr?.on('end', () => resolve(data));
-                            proc.stderr?.on('error', reject);
-                        }),
-                    ]),
-                    timeoutPromise,
-                ]);
-
-                exitCode = await new Promise<number>((resolve, reject) => {
-                    proc.on('close', (code) => resolve(code || 0));
-                    proc.on('error', reject);
-                });
-            } catch (error: unknown) {
-                if (timedOut) {
-                    throw error;
-                }
-                process.kill(-proc.pid!, 'SIGTERM');
-                throw error;
-            }
+            result = await ShellUtils.executeCommand(command);
         }
 
-        const duration = Number.parseFloat(((Date.now() - startTime) / 1000).toFixed(2));
+        // Create friendly message
+        const friendlyMessage = result.success
+            ? `✓ Command completed (exit code: ${result.exitCode})`
+            : result.exitCode === 124
+              ? `⏱️ Command timed out after ${timeout}s (exit code: 124)`
+              : `✗ Command failed (exit code: ${result.exitCode})`;
 
-        // Build result
-        let result = `$ ${command}`;
-
-        if (reason && Config.debug) {
-            result += ` # ${reason}`;
-        }
-
-        result += `\nExit code: ${exitCode}`;
-        result += `\nDuration: ${duration}s`;
-
-        if (stdout) {
-            result += `\n\n--- STDOUT ---\n${stdout}`;
-        }
-
-        if (stderr) {
-            result += `\n\n--- STDERR ---\n${stderr}`;
-        }
-
-        // Create a more informative friendly message
-        let friendlyMessage: string;
-        if (exitCode === 0) {
-            friendlyMessage = `✓ Command completed in ${duration}s (exit code: ${exitCode})`;
-        } else {
-            friendlyMessage = `✗ Command failed in ${duration}s (exit code: ${exitCode})`;
-        }
-
-        // Create formatted output
-        const output: ToolOutput = {
+        return {
             tool: 'run_shell_command',
             friendly: friendlyMessage,
             important: {
-                command: command,
+                command,
+                success: result.success,
+                timedOut: result.exitCode === 124,
             },
             detailed: {
-                reason: reason,
+                reason,
                 timeout: `${timeout}s`,
-                exit_code: exitCode,
-                duration: `${duration}s`,
-            },
-            results: {
-                stdout: stdout,
-                stderr: stderr,
-                showWhenDetailOff: false, // Don't show command output by default
+                exitCode: result.exitCode,
+                stdout: result.stdout,
+                stderr: result.stderr,
             },
         };
-
-        stats.addToolTime(duration);
-        stats.incrementToolCalls();
-
-        // Return formatted output
-        return output;
     } catch (error) {
-        const duration = Number.parseFloat(((Date.now() - startTime) / 1000).toFixed(2));
-        stats.incrementToolErrors();
-        stats.addToolTime(duration);
+        const errorMessage = error instanceof Error ? error.message : String(error);
 
-        const errorMsg = error instanceof Error ? error.message : String(error);
-        const isTimeout = errorMsg.includes('timed out');
-
-        const errorOutput: ToolOutput = {
+        return {
             tool: 'run_shell_command',
-            friendly: isTimeout
-                ? `TIMEOUT: Command timed out after ${timeout} seconds`
-                : `ERROR: Command failed: ${errorMsg}`,
+            friendly: `✗ Command failed: ${errorMessage}`,
             important: {
-                command: command,
+                command,
+                error: errorMessage,
             },
             detailed: {
+                reason,
                 timeout: `${timeout}s`,
-                duration: `${duration}s`,
-            },
-            results: {
-                error: isTimeout
-                    ? `Command timed out after ${timeout} seconds`
-                    : `Error executing command: ${errorMsg}`,
-                showWhenDetailOff: true,
+                error: errorMessage,
             },
         };
-        return errorOutput;
     }
 }

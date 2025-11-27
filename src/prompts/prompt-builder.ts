@@ -5,6 +5,7 @@
  */
 
 import type { PromptContext, PromptOptions } from './interfaces.js';
+import { FileUtils } from '../utils/file-utils.js';
 
 export class PromptBuilder {
     private static defaultPromptTemplate: string;
@@ -24,14 +25,14 @@ export class PromptBuilder {
         let templatePath = 'src/prompts/default-system-prompt.md';
 
         try {
-            const template = await Bun.file(templatePath).text();
+            const template = await FileUtils.readFile(templatePath);
             this.defaultPromptTemplate = template;
             return;
         } catch (error) {
             // If relative path fails, try absolute path from script location
             const scriptDir = new URL('.', import.meta.url).pathname;
             templatePath = `${scriptDir}default-system-prompt.md`;
-            const template = await Bun.file(templatePath).text();
+            const template = await FileUtils.readFile(templatePath);
             this.defaultPromptTemplate = template;
         }
     }
@@ -85,10 +86,9 @@ export class PromptBuilder {
      */
     static async loadPromptOverride(): Promise<string | null> {
         try {
-            const file = Bun.file('PROMPT-OVERRIDE.md');
-            if (await file.exists()) {
+            if (await FileUtils.fileExistsAsync('PROMPT-OVERRIDE.md')) {
                 console.log('[i] Using PROMPT-OVERRIDE.md as system prompt');
-                return await file.text();
+                return await FileUtils.readFile('PROMPT-OVERRIDE.md');
             }
         } catch (error) {
             // Silently ignore if PROMPT-OVERRIDE.md doesn't exist or can't be read
@@ -101,9 +101,8 @@ export class PromptBuilder {
      */
     static async loadAgentsContent(): Promise<string | null> {
         try {
-            const file = Bun.file('AGENTS.md');
-            if (await file.exists()) {
-                return '\n\n---\n\n' + (await file.text());
+            if (await FileUtils.fileExistsAsync('AGENTS.md')) {
+                return '\n\n---\n\n' + (await FileUtils.readFile('AGENTS.md'));
             }
         } catch (error) {
             // Silently ignore if AGENTS.md doesn't exist or can't be read

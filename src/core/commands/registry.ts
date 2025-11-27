@@ -1,4 +1,5 @@
 import { BaseCommand, type CommandContext, type CommandResult } from './base.js';
+import { LogUtils } from '../../utils/log-utils.js';
 import { HelpCommand } from './help.js';
 import { QuitCommand } from './quit.js';
 import { ClearCommand } from './clear.js';
@@ -14,6 +15,7 @@ import { MemoryCommand } from './memory.js';
 import { YoloCommand } from './yolo.js';
 import { DetailCommand } from './detail.js';
 import { SnippetsCommand } from './snippets.js';
+import { CouncilCommand } from './council.js';
 import { Config } from '../config.js';
 
 export class CommandRegistry {
@@ -37,6 +39,7 @@ export class CommandRegistry {
         const yoloCmd = new YoloCommand(context);
         const detailCmd = new DetailCommand(context);
         const snippetsCmd = new SnippetsCommand(context);
+        const councilCmd = new CouncilCommand(context);
 
         this.registerCommand(helpCmd);
         this.registerCommand(quitCmd);
@@ -47,6 +50,7 @@ export class CommandRegistry {
         this.registerCommand(loadCmd);
         this.registerCommand(compactCmd);
         this.registerCommand(sandboxCmd);
+        this.registerCommand(councilCmd);
         this.registerCommand(editCmd);
         this.registerCommand(retryCmd);
         this.registerCommand(memoryCmd);
@@ -128,9 +132,7 @@ export class CommandRegistry {
         // Find and execute command
         const command = this.commands.get(cmdName);
         if (!command) {
-            console.log(
-                `${Config.colors.red}Unknown command: ${commandLine}${Config.colors.reset}`
-            );
+            LogUtils.error(`Unknown command: ${commandLine}`);
             console.log(
                 `Type ${Config.colors.green}/help${Config.colors.reset} to see available commands.`
             );
@@ -141,9 +143,7 @@ export class CommandRegistry {
             return await command.execute(args);
         } catch (error: unknown) {
             const errorMessage = error instanceof Error ? error.message : String(error);
-            console.log(
-                `${Config.colors.red}Error executing command: ${errorMessage}${Config.colors.reset}`
-            );
+            LogUtils.error(`Error executing command: ${errorMessage}`);
             return { shouldQuit: false, runApiCall: false };
         }
     }

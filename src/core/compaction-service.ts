@@ -3,10 +3,12 @@
  * Takes messages, returns compacted messages. That's it.
  */
 
+import { LogUtils } from '../utils/log-utils.js';
 import type { Message } from './message-history.js';
 import type { MessageToolCall } from './types.js';
 import type { StreamingClient } from './streaming-client.js';
 import { Config } from './config.js';
+import { AIProcessor } from './ai-processor.js';
 
 interface MessageGroup {
     messages: Message[];
@@ -18,7 +20,11 @@ interface MessageGroup {
  * Simple compaction service with clean interfaces
  */
 export class CompactionService {
-    constructor(private apiClient: StreamingClient) {}
+    private aiProcessor: AIProcessor;
+
+    constructor(private apiClient: StreamingClient) {
+        this.aiProcessor = new AIProcessor(apiClient);
+    }
 
     /**
      * Compact messages using sliding window + AI summarization
@@ -71,9 +77,7 @@ export class CompactionService {
 
             return newMessages;
         } catch (error) {
-            console.log(
-                `${Config.colors.red}[X] Compaction failed: ${error}${Config.colors.reset}`
-            );
+            LogUtils.error(`[X] Compaction failed: ${error}`);
             throw error; // Re-throw to let caller handle it
         }
     }
@@ -222,14 +226,7 @@ ${this.formatMessagesForSummary(messagesToSummarize)}
 Provide a detailed but concise summary of our conversation above. Focus on information that would be helpful for continuing the conversation, including what we did, what we're doing, which files we're working on, and what we're going to do next. Generate at least 1000 if you have enough information available to do so.`;
 
         try {
-            // Use existing streaming client, collect chunks
-            let fullResponse = '';
-
-            const response = await this.apiClient.streamRequest(
-                [
-                    {
-                        role: 'system',
-                        content: `You are a helpful AI assistant tasked with summarizing conversations.
+            const systemPrompt = `You are a helpful AI assistant tasked with summarizing conversations.
 
 When asked to summarize, provide a detailed but concise summary of the conversation.
 Focus on information that would be helpful for continuing the conversation, including:
@@ -239,26 +236,17 @@ Focus on information that would be helpful for continuing the conversation, incl
 - Which files are being modified
 - What needs to be done next
 
-Your summary should be comprehensive enough to provide context but concise enough to be quickly understood.`,
-                    },
-                    { role: 'user', content: prompt },
-                ],
-                false,
-                true
-            ); // false = non-streaming, true = throwOnError
+Your summary should be comprehensive enough to provide context but concise enough to be quickly understood.`;
 
-            for await (const chunk of response) {
-                const content = chunk.choices?.[0]?.delta?.content;
-                if (content) {
-                    fullResponse += content;
-                }
-            }
-            const summary = fullResponse.trim();
+            // The prompt already contains the formatted messages to summarize
+            const summary = await this.aiProcessor.processMessages(
+                [], // No previous messages needed - prompt contains everything
+                prompt,
+                { systemPrompt, maxRetries: 2 }
+            );
 
             if (!this.validateSummary(summary)) {
-                console.log(
-                    `${Config.colors.yellow}[!] Generated summary appears too short, using anyway${Config.colors.reset}`
-                );
+                LogUtils.warn(`[!] Generated summary appears too short, using anyway`);
             }
 
             return summary || 'Conversation summarized';

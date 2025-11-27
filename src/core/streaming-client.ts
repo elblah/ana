@@ -4,6 +4,7 @@
 
 import { Config } from './config.js';
 import type { Stats } from './stats.js';
+import { LogUtils } from '../utils/log-utils.js';
 import type { Message } from './message-history.js';
 import type { ToolManager } from './tool-manager.js';
 import { MarkdownColorizer } from './markdown-colorizer.js';
@@ -59,8 +60,9 @@ export class StreamingClient {
 
             try {
                 if (Config.debug && attemptNum > 1) {
-                    console.log(
-                        `${Config.colors.yellow}*** Retrying: ${config.baseUrl} with model ${config.model}${Config.colors.reset}`
+                    LogUtils.debug(
+                        `*** Retrying: ${config.baseUrl} with model ${config.model}`,
+                        Config.colors.yellow
                     );
                 }
 
@@ -69,14 +71,17 @@ export class StreamingClient {
 
                 // Debug: Log request details
                 if (Config.debug || attemptNum > 1) {
-                    console.log(
-                        `${Config.colors.yellow}*** Attempt ${attemptNum}: POST ${endpoint}${Config.colors.reset}`
+                    LogUtils.debug(
+                        `*** Attempt ${attemptNum}: POST ${endpoint}`,
+                        Config.colors.yellow
                     );
-                    console.log(
-                        `${Config.colors.yellow}*** Model: ${config.model}, Messages: ${messages.length}${Config.colors.reset}`
+                    LogUtils.debug(
+                        `*** Model: ${config.model}, Messages: ${messages.length}`,
+                        Config.colors.yellow
                     );
-                    console.log(
-                        `${Config.colors.yellow}*** Request size: ${JSON.stringify(requestData).length} bytes${Config.colors.reset}`
+                    LogUtils.debug(
+                        `*** Request size: ${JSON.stringify(requestData).length} bytes`,
+                        Config.colors.yellow
                     );
                 }
 
@@ -100,12 +105,10 @@ export class StreamingClient {
 
                 if (!response.ok) {
                     // Log more details about the failed response
-                    console.error(`${Config.colors.red}HTTP Error Response:${Config.colors.reset}`);
-                    console.error(
-                        `${Config.colors.red}  Status: ${response.status} ${response.statusText}${Config.colors.reset}`
-                    );
-                    console.error(
-                        `${Config.colors.red}  Headers: ${JSON.stringify(Object.fromEntries(response.headers.entries()))}${Config.colors.reset}`
+                    LogUtils.error('HTTP Error Response:');
+                    LogUtils.error(`  Status: ${response.status} ${response.statusText}`);
+                    LogUtils.error(
+                        `  Headers: ${JSON.stringify(Object.fromEntries(response.headers.entries()))}`
                     );
                     throw new Error(`HTTP ${response.status}: ${response.statusText}`);
                 }
@@ -148,12 +151,8 @@ export class StreamingClient {
                                         const chunk: StreamChunk = JSON.parse(data);
                                         yield chunk;
                                     } catch (error) {
-                                        console.error(
-                                            `${Config.colors.red}SSE Parse Error: ${error}${Config.colors.reset}`
-                                        );
-                                        console.error(
-                                            `${Config.colors.red}Raw data: ${data.substring(0, 200)}${Config.colors.reset}`
-                                        );
+                                        LogUtils.error(`SSE Parse Error: ${error}`);
+                                        LogUtils.error(`Raw data: ${data.substring(0, 200)}`);
                                         continue;
                                     }
                                 }
@@ -195,14 +194,10 @@ export class StreamingClient {
                 return; // Success, exit the loop
             } catch (error) {
                 if (Config.debug) {
-                    console.error(
-                        `${Config.colors.red}Attempt ${attemptNum} failed: ${error}${Config.colors.reset}`
-                    );
-                    console.error(
-                        `${Config.colors.red}Error type: ${typeof error}${Config.colors.reset}`
-                    );
-                    console.error(
-                        `${Config.colors.red}Error stack: ${error instanceof Error ? error.stack : 'No stack'}${Config.colors.reset}`
+                    LogUtils.error(`Attempt ${attemptNum} failed: ${error}`);
+                    LogUtils.error(`Error type: ${typeof error}`);
+                    LogUtils.error(
+                        `Error stack: ${error instanceof Error ? error.stack : 'No stack'}`
                     );
                 }
 
@@ -212,7 +207,7 @@ export class StreamingClient {
                     this.stats.addApiTime((Date.now() - startTime) / 1000);
 
                     const errorMsg = `All API attempts failed. Last error: ${error instanceof Error ? error.message : String(error)}`;
-                    console.error(`${Config.colors.red}${errorMsg}${Config.colors.reset}`);
+                    LogUtils.error(errorMsg);
 
                     if (throwOnError) {
                         throw new Error(
@@ -268,25 +263,18 @@ export class StreamingClient {
             data.tools = toolDefinitions;
             data.tool_choice = 'auto';
 
-            if (Config.debug) {
-                console.log(
-                    `${Config.colors.yellow}*** Tool definitions count: ${toolDefinitions.length}${Config.colors.reset}`
-                );
-                console.log(
-                    `${Config.colors.yellow}*** Message count: ${messages.length}${Config.colors.reset}`
-                );
-            }
+            LogUtils.debug(
+                `*** Tool definitions count: ${toolDefinitions.length}`,
+                Config.colors.yellow
+            );
+            LogUtils.debug(`*** Message count: ${messages.length}`, Config.colors.yellow);
         }
 
         // Validate request size to prevent HTTP errors
         const requestData = JSON.stringify(data);
         const reqSize = Buffer.byteLength(requestData, 'utf8');
 
-        if (Config.debug) {
-            console.log(
-                `${Config.colors.yellow}*** Request size: ${reqSize} bytes${Config.colors.reset}`
-            );
-        }
+        LogUtils.debug(`*** Request size: ${reqSize} bytes`, Config.colors.yellow);
 
         // Prevent oversized requests (common cause of 401/413 errors)
         const maxRequestSize = 1024 * 1024; // 1MB
@@ -297,8 +285,6 @@ export class StreamingClient {
         }
 
         return JSON.parse(requestData);
-
-        return data;
     }
 
     /**

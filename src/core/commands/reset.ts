@@ -1,5 +1,6 @@
 import { BaseCommand, type CommandResult } from './base.js';
 import { Config } from '../config.js';
+import { LogUtils } from '../../utils/log-utils.js';
 
 export class ResetCommand extends BaseCommand {
     protected name = 'reset';
@@ -8,7 +9,7 @@ export class ResetCommand extends BaseCommand {
     execute(): CommandResult {
         this.context.messageHistory.clear();
         this.context.stats.reset();
-        console.log(`${Config.colors.green}Session reset. Starting fresh.${Config.colors.reset}`);
+        LogUtils.success('Session reset. Starting fresh.');
         return { shouldQuit: false, runApiCall: false };
     }
 }

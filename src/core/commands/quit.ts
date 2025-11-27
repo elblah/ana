@@ -1,5 +1,6 @@
 import { BaseCommand, type CommandResult } from './base.js';
 import { Config } from '../config.js';
+import { LogUtils } from '../../utils/log-utils.js';
 
 export class QuitCommand extends BaseCommand {
     protected name = 'quit';
@@ -10,7 +11,7 @@ export class QuitCommand extends BaseCommand {
     }
 
     execute(): CommandResult {
-        console.log(`${Config.colors.yellow}Goodbye!${Config.colors.reset}`);
+        LogUtils.success('Goodbye!');
         return { shouldQuit: true, runApiCall: false };
     }
 }

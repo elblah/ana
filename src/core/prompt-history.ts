@@ -6,15 +6,20 @@ import * as os from 'node:os';
  * Simple JSONL prompt history - compatible with Python version
  */
 export class PromptHistory {
-    private historyPath: string;
+    private historyPath: string | null;
 
     constructor() {
         const aicoderDir = '.aicoder';
         this.historyPath = path.join(aicoderDir, 'history');
 
-        // Ensure .aicoder directory exists
-        if (!fs.existsSync(aicoderDir)) {
-            fs.mkdirSync(aicoderDir, { recursive: true });
+        // Ensure .aicoder directory exists - fail silently if unable to create
+        try {
+            if (!fs.existsSync(aicoderDir)) {
+                fs.mkdirSync(aicoderDir, { recursive: true });
+            }
+        } catch (error) {
+            // Silent fail - history functionality will be disabled
+            this.historyPath = null;
         }
     }
 
@@ -24,6 +29,11 @@ export class PromptHistory {
     async savePrompt(prompt: string): Promise<void> {
         // Skip empty prompts and approval responses
         if (!prompt.trim() || prompt.match(/^[Yn]$/i)) {
+            return;
+        }
+
+        // If history is disabled, return silently
+        if (!this.historyPath) {
             return;
         }
 
@@ -42,6 +52,11 @@ export class PromptHistory {
      * Read all prompts from history (async)
      */
     async readHistory(): Promise<Array<{ prompt: string }>> {
+        // If history is disabled, return empty array
+        if (!this.historyPath) {
+            return [];
+        }
+
         try {
             if (!fs.existsSync(this.historyPath)) {
                 return [];
@@ -73,6 +88,11 @@ export class PromptHistory {
      * Read all prompts from history (sync for constructor)
      */
     readHistorySync(): Array<{ prompt: string }> {
+        // If history is disabled, return empty array
+        if (!this.historyPath) {
+            return [];
+        }
+
         try {
             if (!fs.existsSync(this.historyPath)) {
                 return [];

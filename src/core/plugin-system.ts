@@ -12,6 +12,7 @@
 
 import type { ToolDefinition } from './tool-manager.js';
 import { Config } from './config.js';
+import { LogUtils } from '../utils/log-utils.js';
 import type { ToolOutput } from './tool-formatter.js';
 import type {
     ToolParameters,
@@ -57,7 +58,7 @@ export interface PluginTool {
     description: string;
     parameters: ToolParameters;
     execute(args: ToolExecutionArgs): Promise<string>;
-    auto_approved?: boolean;  // Whether tool is auto-approved (default: false)
+    auto_approved?: boolean; // Whether tool is auto-approved (default: false)
 }
 
 /**
@@ -121,12 +122,10 @@ class PluginSystem {
         try {
             if (!fs.existsSync(pluginsDir)) {
                 if (Config.debug) {
-                    console.log(
-                        `${Config.colors.yellow}[*] No plugins directory: ${pluginsDir}${Config.colors.reset}`
-                    );
-                    console.log(
-                        `${Config.colors.cyan}[*] Create it to install plugins: mkdir -p "${pluginsDir}"${Config.colors.reset}`
-                    );
+                    LogUtils.warn(`[*] No plugins directory: ${pluginsDir}`);
+                    LogUtils.print(`[*] Create it to install plugins: mkdir -p "${pluginsDir}"`, {
+                        color: Config.colors.cyan,
+                    });
                 }
                 return;
             }
@@ -142,14 +141,10 @@ class PluginSystem {
             }
 
             if (Config.debug) {
-                console.log(
-                    `${Config.colors.green}[*] Loaded ${loadedCount} plugins${Config.colors.reset}`
-                );
+                LogUtils.success(`[*] Loaded ${loadedCount} plugins`);
             }
         } catch (error) {
-            console.log(
-                `${Config.colors.red}[x] Plugin loading failed: ${error}${Config.colors.reset}`
-            );
+            LogUtils.error(`[x] Plugin loading failed: ${error}`);
         }
     }
 
@@ -178,9 +173,7 @@ class PluginSystem {
                         try {
                             plugin.initialize();
                         } catch (error) {
-                            console.log(
-                                `${Config.colors.red}[x] Plugin ${plugin.name} init failed: ${error}${Config.colors.reset}`
-                            );
+                            LogUtils.error(`[x] Plugin ${plugin.name} init failed: ${error}`);
                             // Remove failed plugin
                             this.plugins.delete(plugin.name);
                             return;
@@ -195,29 +188,23 @@ class PluginSystem {
                                 this.tools.set(tool.name, tool);
                             }
                         } catch (error) {
-                            console.log(
-                                `${Config.colors.red}[x] Plugin ${plugin.name} tools failed: ${error}${Config.colors.reset}`
-                            );
+                            LogUtils.error(`[x] Plugin ${plugin.name} tools failed: ${error}`);
                         }
                     }
 
-                    console.log(
-                        `${Config.colors.green}[+] Plugin: ${plugin.name} v${plugin.version}${Config.colors.reset}`
-                    );
+                    LogUtils.success(`[+] Plugin: ${plugin.name} v${plugin.version}`);
                 } else {
-                    console.log(
-                        `${Config.colors.red}[x] Invalid plugin format in ${filePath}: Must implement Plugin interface${Config.colors.reset}`
+                    LogUtils.error(
+                        `[x] Invalid plugin format in ${filePath}: Must implement Plugin interface`
                     );
                 }
             } else {
-                console.log(
-                    `${Config.colors.red}[x] Invalid plugin format in ${filePath}: Must export default createPlugin(context) function${Config.colors.reset}`
+                LogUtils.error(
+                    `[x] Invalid plugin format in ${filePath}: Must export default createPlugin(context) function`
                 );
             }
         } catch (error) {
-            console.log(
-                `${Config.colors.red}[x] Failed to load ${filePath}: ${error}${Config.colors.reset}`
-            );
+            LogUtils.error(`[x] Failed to load ${filePath}: ${error}`);
         }
     }
 
@@ -262,7 +249,10 @@ class PluginSystem {
      */
     getAllTools(): Map<string, PluginTool> {
         if (Config.debug) {
-            console.log(`[DEBUG] getAllTools() returning ${this.tools.size} tools:`, Array.from(this.tools.keys()));
+            console.log(
+                `[DEBUG] getAllTools() returning ${this.tools.size} tools:`,
+                Array.from(this.tools.keys())
+            );
         }
         return this.tools;
     }
@@ -279,9 +269,7 @@ class PluginSystem {
         try {
             return await tool.execute(args);
         } catch (error) {
-            console.log(
-                `${Config.colors.red}[x] Tool ${name} failed: ${error}${Config.colors.reset}`
-            );
+            LogUtils.error(`[x] Tool ${name} failed: ${error}`);
             throw error;
         }
     }
@@ -295,13 +283,25 @@ class PluginSystem {
         for (const [name, tool] of this.tools) {
             definitions.push({
                 type: 'plugin',
-                auto_approved: false,
+                auto_approved: tool.auto_approved || false,
                 approval_excludes_arguments: false,
                 approval_key_exclude_arguments: [],
                 hide_results: false,
                 description: tool.description,
                 parameters: tool.parameters,
-                execute: tool.execute,
+                execute: async (args: ToolExecutionArgs): Promise<ToolOutput> => {
+                    const result = await tool.execute(args);
+                    // Convert plugin string result to ToolOutput
+                    return {
+                        tool: name,
+                        friendly: `✓ Plugin tool ${name} executed`,
+                        important: {},
+                        results: {
+                            content: result,
+                            showWhenDetailOff: true,
+                        },
+                    };
+                },
             });
         }
 
@@ -321,9 +321,7 @@ class PluginSystem {
                     }
                 }
             } catch (error) {
-                console.log(
-                    `${Config.colors.red}[x] Plugin ${plugin.name} beforeToolCall failed: ${error}${Config.colors.reset}`
-                );
+                LogUtils.error(`[x] Plugin ${plugin.name} beforeToolCall failed: ${error}`);
             }
         }
     }
@@ -343,9 +341,7 @@ class PluginSystem {
                     }
                 }
             } catch (error) {
-                console.log(
-                    `${Config.colors.red}[x] Plugin ${plugin.name} afterToolCall failed: ${error}${Config.colors.reset}`
-                );
+                LogUtils.error(`[x] Plugin ${plugin.name} afterToolCall failed: ${error}`);
             }
         }
 
@@ -367,9 +363,7 @@ class PluginSystem {
                     }
                 }
             } catch (error) {
-                console.log(
-                    `${Config.colors.red}[x] Plugin ${plugin.name} beforeFileWrite failed: ${error}${Config.colors.reset}`
-                );
+                LogUtils.error(`[x] Plugin ${plugin.name} beforeFileWrite failed: ${error}`);
             }
         }
 
@@ -386,9 +380,7 @@ class PluginSystem {
                     plugin.afterFileWrite(path, content);
                 }
             } catch (error) {
-                console.log(
-                    `${Config.colors.red}[x] Plugin ${plugin.name} afterFileWrite failed: ${error}${Config.colors.reset}`
-                );
+                LogUtils.error(`[x] Plugin ${plugin.name} afterFileWrite failed: ${error}`);
             }
         }
     }
@@ -417,9 +409,7 @@ class PluginSystem {
                     plugin.cleanup();
                 }
             } catch (error) {
-                console.log(
-                    `${Config.colors.red}[x] Plugin ${plugin.name} cleanup failed: ${error}${Config.colors.reset}`
-                );
+                LogUtils.error(`[x] Plugin ${plugin.name} cleanup failed: ${error}`);
             }
         }
 

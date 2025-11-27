@@ -1,5 +1,7 @@
 import { BaseCommand, type CommandResult } from './base.js';
 import { Config } from '../config.js';
+import { JsonUtils } from '../../utils/json-utils.js';
+import { LogUtils } from '../../utils/log-utils.js';
 
 export class SaveCommand extends BaseCommand {
     protected name = 'save';
@@ -11,10 +13,10 @@ export class SaveCommand extends BaseCommand {
         try {
             const sessionData = this.context.messageHistory.getMessages();
 
-            await Bun.write(filename, JSON.stringify(sessionData, null, 2));
-            console.log(`${Config.colors.green}Session saved to ${filename}${Config.colors.reset}`);
+            await JsonUtils.writeFile(filename, sessionData as unknown);
+            LogUtils.success(`Session saved to ${filename}`);
         } catch (error) {
-            console.log(`${Config.colors.red}Error saving session: ${error}${Config.colors.reset}`);
+            LogUtils.error(`Error saving session: ${error}`);
         }
 
         return { shouldQuit: false, runApiCall: false };

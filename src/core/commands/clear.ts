@@ -1,5 +1,6 @@
 import { BaseCommand, type CommandResult } from './base.js';
 import { Config } from '../config.js';
+import { LogUtils } from '../../utils/log-utils.js';
 
 export class ClearCommand extends BaseCommand {
     protected name = 'clear';
@@ -8,7 +9,7 @@ export class ClearCommand extends BaseCommand {
     execute(): CommandResult {
         console.clear();
         this.context.messageHistory.clear();
-        console.log(`${Config.colors.green}Conversation history cleared.${Config.colors.reset}`);
+        LogUtils.success('Conversation history cleared.');
         return { shouldQuit: false, runApiCall: false };
     }
 }

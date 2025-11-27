@@ -1,5 +1,6 @@
 import { BaseCommand, type CommandResult, CommandContext, CommandHandler } from './base.js';
 import { Config } from '../config.js';
+import { LogUtils } from '../../utils/log-utils.js';
 
 export class HelpCommand extends BaseCommand {
     protected name = 'help';
@@ -13,9 +14,7 @@ export class HelpCommand extends BaseCommand {
         // Get commands from command handler
         const commandHandler = this.context.commandHandler;
         if (!commandHandler) {
-            console.log(
-                `${Config.colors.red}Error: Command handler not available${Config.colors.reset}`
-            );
+            LogUtils.error(`Error: Command handler not available`);
             return { shouldQuit: false, runApiCall: false };
         }
 
@@ -56,7 +55,7 @@ ${Config.colors.bold}Available Commands:${Config.colors.reset}
 ${commandList}
 `;
 
-        console.log(help);
+        LogUtils.print(help);
         return { shouldQuit: false, runApiCall: false };
     }
 }
