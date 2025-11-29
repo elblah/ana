@@ -5,21 +5,27 @@
 import { Config } from './config.js';
 import { Stats } from './stats.js';
 import { LogUtils } from '../utils/log-utils.js';
-import { MessageHistory, Message } from './message-history.js';
-import { StreamingClient, StreamChunk, type ToolCall } from './streaming-client.js';
-import type { MessageToolCall, StreamChunkData } from './types.js';
+import { MessageHistory } from './message-history.js';
+import { StreamingClient } from './streaming-client.js';
+import type { 
+    Message, 
+    MessageToolCall, 
+    StreamChunkData,
+    StreamChunk,
+    ToolCall,
+    ToolExecutionArgs,
+    NotificationHooks, 
+    HookName 
+} from './types/index.js';
 import { ToolManager } from './tool-manager.js';
-import { ToolFormatter } from './tool-formatter.js';
+import { ToolFormatter, type ToolOutput } from './tool-formatter.js';
 import { InputHandler } from './input-handler.js';
 import { CommandHandler } from './command-handler.js';
 import { pluginSystem } from './plugin-system.js';
-import type { ToolExecutionArgs } from './types.js';
-import type { ToolOutput } from './tool-formatter.js';
 import { ContextBar } from './context-bar.js';
 import { StreamUtils } from '../utils/stream-utils.js';
 import { PromptBuilder } from '../prompts/prompt-builder.js';
 import { expandSnippets } from './snippet-utils.js';
-import type { NotificationHooks, HookName } from './types.js';
 
 export class AICoder {
     private stats: Stats;
@@ -292,14 +298,20 @@ export class AICoder {
     }
 
     private handleEmptyResponse(fullResponse: string): void {
-        if (fullResponse) {
+        if (Config.debug) {
+            LogUtils.debug(`*** handleEmptyResponse called with: "${fullResponse}" (length: ${fullResponse?.length || 0})`, Config.colors.yellow);
+        }
+        
+        if (fullResponse && fullResponse.trim() !== '') {
+            // AI provided text response but no tools
             this.messageHistory.addAssistantMessage({ content: fullResponse });
             console.log('');
-            return;
+        } else {
+            // AI provided no text response (this is normal when AI has nothing to say)
+            // Add a minimal message to show AI responded, then continue
+            this.messageHistory.addAssistantMessage({ content: '' });
+            console.log('');
         }
-
-        this.messageHistory.addAssistantMessage({ content: '[No response received]' });
-        LogUtils.warn('[No response received - continuing...]');
     }
 
     /**
@@ -424,117 +436,184 @@ export class AICoder {
     }
 
     /**
+     * Prepare for AI processing - compaction, setup, and interruption check
+     */
+    private async prepareForProcessing(): Promise<{ shouldContinue: boolean; messages: any[] }> {
+        // Auto-compaction before AI request
+        if (this.messageHistory.shouldAutoCompact()) {
+            await this.performAutoCompaction();
+        }
+
+        const messages = this.messageHistory.getMessages();
+
+        LogUtils.debug(`*** Sending ${messages.length} messages to API`, Config.colors.yellow);
+
+        // Show context bar before AI response
+        console.log();
+        this.contextBar.printContextBar(this.stats, this.messageHistory);
+
+        LogUtils.print('AI: ', { color: Config.colors.green, bold: true });
+
+        // Check if user interrupted before starting stream
+        if (!this.isProcessing) {
+            console.log('\n[AI response interrupted before starting]');
+            return { shouldContinue: false, messages };
+        }
+
+        return { shouldContinue: true, messages };
+    }
+
+    /**
+     * Validate and process accumulated tool calls
+     */
+    private async validateAndProcessToolCalls(fullResponse: string, accumulatedToolCalls: Map<number, ToolCall>): Promise<boolean> {
+        if (accumulatedToolCalls.size === 0) {
+            this.handleEmptyResponse(fullResponse);
+            return false;
+        }
+
+        const toolCalls = Array.from(accumulatedToolCalls.values());
+        this.debugToolCalls(toolCalls);
+
+        const validToolCalls = this.validateToolCalls(toolCalls);
+        if (validToolCalls.length === 0) {
+            LogUtils.error('No valid tool calls to execute');
+            return false;
+        }
+
+        this.messageHistory.addAssistantMessage({
+            content: fullResponse || "I'll help you with that.",
+            tool_calls: validToolCalls.map((call, index) => ({
+                ...call,
+                index,
+            })) as MessageToolCall[],
+        });
+
+        await this.executeToolCalls(validToolCalls);
+        return true;
+    }
+
+    /**
+     * Stream AI response and handle chunks
+     */
+    private async streamResponse(
+        messages: any[]
+    ): Promise<{ shouldContinue: boolean; fullResponse: string; accumulatedToolCalls: Map<number, ToolCall> }> {
+        let fullResponse = '';
+        const accumulatedToolCalls: Map<number, ToolCall> = new Map();
+
+        for await (const chunk of this.streamingClient.streamRequest(messages)) {
+            // Check if user interrupted
+            if (!this.isProcessing) {
+                console.log('\n[AI response interrupted]');
+                return { shouldContinue: false, fullResponse, accumulatedToolCalls };
+            }
+
+            // Handle chunk
+            this.handleStreamChunk(chunk, fullResponse, accumulatedToolCalls);
+        }
+
+        return { shouldContinue: true, fullResponse, accumulatedToolCalls };
+    }
+
+    /**
+     * Handle individual stream chunk
+     */
+    private handleStreamChunk(
+        chunk: any, 
+        fullResponse: string, 
+        accumulatedToolCalls: Map<number, ToolCall>
+    ): void {
+        if (chunk.usage) {
+            this.streamingClient.updateTokenStats(chunk.usage);
+        }
+
+        const choice = chunk.choices?.[0];
+        if (!choice) return;
+
+        // Content
+        if (choice.delta?.content) {
+            fullResponse += choice.delta.content;
+            const coloredContent = this.streamingClient.processWithColorization(
+                choice.delta.content
+            );
+            process.stdout.write(coloredContent);
+        }
+
+        // Tool calls
+        if (choice.delta?.tool_calls) {
+            for (const toolCall of choice.delta.tool_calls) {
+                this.accumulateToolCall(toolCall, accumulatedToolCalls);
+            }
+        }
+
+        if (choice.finish_reason === 'tool_calls') {
+            process.stdout.write('\n');
+        }
+    }
+
+    /**
+     * Handle processing errors
+     */
+    private handleProcessingError(error: unknown): void {
+        this.messageHistory.addAssistantMessage({
+            content: `[AI Error: ${error instanceof Error ? error.message : String(error)}]`,
+        });
+        LogUtils.error(`AI Error: ${error}`);
+    }
+
+    /**
+     * Handle post-processing after tool calls
+     */
+    private async handlePostProcessing(hasToolCalls: boolean): Promise<void> {
+        if (hasToolCalls && this.isProcessing && this.messageHistory.shouldAutoCompact()) {
+            await this.performAutoCompaction('after tool execution');
+        }
+
+        if (hasToolCalls && this.isProcessing) {
+            try {
+                await this.processWithAI();
+            } catch (error) {
+                LogUtils.error(`AI Error: ${error}`);
+            }
+        }
+    }
+
+    /**
      * Process conversation with AI
      */
     private async processWithAI(): Promise<void> {
         this.isProcessing = true;
 
         try {
-            // Auto-compaction before AI request
-            if (this.messageHistory.shouldAutoCompact()) {
-                await this.performAutoCompaction();
-            }
-
-            const messages = this.messageHistory.getMessages();
-
-            LogUtils.debug(`*** Sending ${messages.length} messages to API`, Config.colors.yellow);
-
-            // Show context bar before AI response
-            console.log();
-            this.contextBar.printContextBar(this.stats, this.messageHistory);
-
-            LogUtils.print('AI: ', { color: Config.colors.green, bold: true });
-
-            let fullResponse = '';
-            const accumulatedToolCalls: Map<number, ToolCall> = new Map();
-
-            // Check if user interrupted before starting stream
-            if (!this.isProcessing) {
-                console.log('\n[AI response interrupted before starting]');
+            const preparation = await this.prepareForProcessing();
+            if (!preparation.shouldContinue) {
                 return;
             }
 
-            // Reset colorizer for new response
             this.streamingClient.resetColorizer();
 
-            // Stream response
-            for await (const chunk of this.streamingClient.streamRequest(messages)) {
-                // Check if user interrupted
-                if (!this.isProcessing) {
-                    console.log('\n[AI response interrupted]');
-                    break;
-                }
-
-                // Handle chunk
-                if (chunk.usage) {
-                    this.streamingClient.updateTokenStats(chunk.usage);
-                }
-
-                const choice = chunk.choices?.[0];
-                if (!choice) continue;
-
-                // Content
-                if (choice.delta?.content) {
-                    fullResponse += choice.delta.content;
-                    const coloredContent = this.streamingClient.processWithColorization(
-                        choice.delta.content
-                    );
-                    process.stdout.write(coloredContent);
-                }
-
-                // Tool calls
-                if (choice.delta?.tool_calls) {
-                    for (const toolCall of choice.delta.tool_calls) {
-                        this.accumulateToolCall(toolCall, accumulatedToolCalls);
-                    }
-                }
-
-                if (choice.finish_reason === 'tool_calls') {
-                    process.stdout.write('\n');
-                }
+            if (Config.debug) {
+                LogUtils.debug(`*** Sending ${preparation.messages.length} messages to API`, Config.colors.yellow);
             }
 
-            // Process accumulated tool calls
-            if (accumulatedToolCalls.size === 0) {
-                this.handleEmptyResponse(fullResponse);
+            const streamingResult = await this.streamResponse(preparation.messages);
+            if (!streamingResult.shouldContinue) {
                 return;
             }
 
-            const toolCalls = Array.from(accumulatedToolCalls.values());
-            this.debugToolCalls(toolCalls);
-
-            const validToolCalls = this.validateToolCalls(toolCalls);
-            if (validToolCalls.length === 0) {
-                LogUtils.error('No valid tool calls to execute');
-                return;
+            if (Config.debug) {
+                LogUtils.debug(`*** Stream complete. Full response length: ${streamingResult.fullResponse?.length || 0}, Tool calls: ${streamingResult.accumulatedToolCalls.size}`);
             }
 
-            this.messageHistory.addAssistantMessage({
-                content: fullResponse || "I'll help you with that.",
-                tool_calls: validToolCalls.map((call, index) => ({
-                    ...call,
-                    index,
-                })) as MessageToolCall[],
-            });
+            const hasToolCalls = await this.validateAndProcessToolCalls(
+                streamingResult.fullResponse, 
+                streamingResult.accumulatedToolCalls
+            );
 
-            await this.executeToolCalls(validToolCalls);
-
-            if (this.isProcessing && this.messageHistory.shouldAutoCompact()) {
-                await this.performAutoCompaction('after tool execution');
-            }
-
-            if (this.isProcessing) {
-                try {
-                    await this.processWithAI();
-                } catch (error) {
-                    LogUtils.error(`AI Error: ${error}`);
-                }
-            }
+            await this.handlePostProcessing(hasToolCalls);
         } catch (error) {
-            this.messageHistory.addAssistantMessage({
-                content: `[AI Error: ${error instanceof Error ? error.message : String(error)}]`,
-            });
-            LogUtils.error(`AI Error: ${error}`);
+            this.handleProcessingError(error);
         } finally {
             this.isProcessing = false;
         }

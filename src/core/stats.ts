@@ -2,7 +2,7 @@
  * Statistics tracking for AI Coder
  */
 
-import type { ApiUsage } from './types.js';
+import type { ApiUsage } from './types/index.js';
 
 export class Stats {
     public apiRequests = 0;

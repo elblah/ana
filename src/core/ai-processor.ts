@@ -3,8 +3,7 @@
  * Unified way to process messages with AI for different purposes
  */
 
-import type { Message } from './message-history.js';
-import type { StreamingClient } from './streaming-client.js';
+import type { Message, StreamingClient } from './types/index.js';
 import { Config } from './config.js';
 import { LogUtils } from '../utils/log-utils.js';
 

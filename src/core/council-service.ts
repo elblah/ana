@@ -1,8 +1,3 @@
-/**
- * Council Service - Expert opinion system using AI Processor
- * Provides council reviews of AI work using file-based member definitions
- */
-
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
@@ -11,28 +6,18 @@ import { AIProcessor } from './ai-processor.js';
 import { LogUtils } from '../utils/log-utils.js';
 import { Config } from './config.js';
 
-/**
- * Council member definition
- */
 export interface CouncilMember {
     name: string;
     prompt: string;
 }
 
-/**
- * Council session state
- */
 export interface CouncilSession {
     originalMessages: Message[];
     opinions: Map<string, string>;
-    currentMember?: string;
-    finalPlan?: string | null;
     consensusAchieved: boolean;
+    finalPlan?: string;
 }
 
-/**
- * Council service for expert opinions
- */
 export class CouncilService {
     private processor: AIProcessor;
     private session: CouncilSession | null = null;
@@ -51,18 +36,22 @@ export class CouncilService {
             consensusAchieved: false
         };
 
-        LogUtils.print('🏛️ Council session started', { color: Config.colors.cyan });
-        LogUtils.print(`📋 Backing up conversation context...`, { color: Config.colors.cyan });
+        LogUtils.print('Council session started', { color: Config.colors.cyan });
     }
 
     /**
      * Load council members from filesystem with optional filtering
      */
     async loadMembers(filters?: string[]): Promise<{ members: CouncilMember[], moderator: CouncilMember | null }> {
-        const councilDir = path.join(os.homedir(), '.config/aicoder-mini/council');
+        // Hierarchical config: project-specific first, then global fallback
+        const projectCouncilDir = path.join(process.cwd(), '.aicoder/council');
+        const globalCouncilDir = path.join(os.homedir(), '.config/aicoder-mini/council');
+        
+        // Use project-specific if available, otherwise global
+        const councilDir = fs.existsSync(projectCouncilDir) ? projectCouncilDir : globalCouncilDir;
         
         if (!fs.existsSync(councilDir)) {
-            LogUtils.error('🏛️ Council not configured');
+            LogUtils.error('Council not configured');
             LogUtils.print('');
             LogUtils.print('Council directory not found:', { color: Config.colors.yellow });
             LogUtils.print(`  ${councilDir}`);
@@ -111,8 +100,14 @@ export class CouncilService {
             }
         }
 
-        LogUtils.print(`✓ Found ${members.length} council members${moderator ? ' + 1 moderator' : ''}`, { 
-            color: Config.colors.green 
+        // Show which council source is being used
+        const isProjectSpecific = councilDir === path.join(process.cwd(), '.aicoder/council');
+        const sourceType = isProjectSpecific ? 'Project' : 'Global';
+        LogUtils.print(`Using ${sourceType} council: ${councilDir}`, {
+            color: Config.colors.cyan
+        });
+        LogUtils.print(`✓ Found ${members.length} council members${moderator ? ' + 1 moderator' : ''}`, {
+            color: Config.colors.green
         });
 
         return { members, moderator };
@@ -121,24 +116,57 @@ export class CouncilService {
     /**
      * Get opinion from a specific council member
      */
-    async getMemberOpinion(member: CouncilMember): Promise<string> {
+    async getMemberOpinion(member: CouncilMember, userInput?: string): Promise<string> {
         if (!this.session) {
             throw new Error('No active council session');
         }
 
+        // Extract user's specific request from input parameter or most recent user message
+        const lastUserMessage = this.session.originalMessages
+            .filter(msg => msg.role === 'user')
+            .pop();
+
+        const userRequest = userInput || lastUserMessage?.content || '';
+        
+        // Filter out system messages from recent context, include tool calls
+        let recentContext = this.session.originalMessages
+            .filter(msg => msg.role !== 'system')
+            .map(msg => {
+                let line = `${msg.role}:`;
+                if (msg.content) {
+                    line += ` ${msg.content}`;
+                }
+                if (msg.tool_calls && msg.tool_calls.length > 0) {
+                    const toolCalls = msg.tool_calls.map(tc => 
+                        `[${tc.function.name}(${tc.function.arguments})]`
+                    ).join(' ');
+                    line += ` ${toolCalls}`;
+                }
+                return line;
+            })
+            .join('\n');
+
+        // Add the council message as the last user message in the context
+        if (userRequest) {
+            recentContext += '\n' + `user: ${userRequest}`;
+        }
+
         const prompt = `${member.prompt}
 
-Based on the conversation above, what is your opinion about the approach being taken?
+User's specific request: "${userRequest}"
 
-Please provide:
-1. Your assessment of the current approach
-2. Any concerns or suggestions
-3. Your vote/recommendation in [VOTE] format at the end
+Recent context (most recent messages appear last):
+${recentContext}`;
 
-Example: [VOTE] Proceed with the JWT approach but simplify the refresh token logic`;
+        // Debug: Print the full prompt being sent
+        if (Config.debug) {
+            LogUtils.print(`Prompt being sent to ${member.name}:`, { color: Config.colors.yellow });
+            LogUtils.print(prompt, { color: Config.colors.dim });
+            LogUtils.print('─'.repeat(50), { color: Config.colors.dim });
+        }
 
         try {
-            LogUtils.print(`🎯 Getting opinion from ${member.name}...`, { color: Config.colors.blue });
+            LogUtils.print(`Getting opinion from ${member.name}...`, { color: Config.colors.blue });
             
             const opinion = await this.processor.processMessages(
                 this.session.originalMessages,
@@ -207,7 +235,7 @@ If there's no clear consensus, explain why and suggest how to resolve the disagr
 Example: [PLAN] All members agree to simplify the auth approach using session storage instead of JWT tokens...`;
 
         try {
-            LogUtils.print(`📋 Moderator synthesizing consensus...`, { color: Config.colors.blue });
+            LogUtils.print(`Moderator synthesizing consensus...`, { color: Config.colors.blue });
             
             const consensus = await this.processor.processMessages(
                 this.session.originalMessages,
@@ -244,7 +272,7 @@ Example: [PLAN] All members agree to simplify the auth approach using session st
      */
     clearSession(): void {
         this.session = null;
-        LogUtils.print('🏛️ Council session cleared', { color: Config.colors.cyan });
+        LogUtils.print('Council session cleared', { color: Config.colors.cyan });
     }
 
     /**

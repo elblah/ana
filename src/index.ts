@@ -6,11 +6,27 @@
  */
 
 import { AICoder } from './core/aicoder.js';
+import { Config } from './core/config.js';
 
 async function main(): Promise<void> {
+    const startTime = Date.now();
+    
     try {
+        // Check if running in interactive terminal
+        if (!process.stdin.isTTY) {
+            console.error('Error: AI Coder requires an interactive terminal.');
+            console.error('Usage: bun src/index.ts');
+            process.exit(1);
+        }
+
         const app = new AICoder();
         await app.initialize();
+        
+        if (Config.debug) {
+            const initTime = Date.now() - startTime;
+            console.log(`[DEBUG] Initialization time: ${initTime}ms`);
+        }
+        
         await app.run();
     } catch (error) {
         console.error('Fatal error:', error);

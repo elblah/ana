@@ -4,7 +4,7 @@
 
 import { FileUtils } from '../../utils/file-utils.js';
 import { ToolFormatter, type ToolOutput } from '../../core/tool-formatter.js';
-import type { ToolExecutionArgs } from '../../core/types.js';
+import type { ToolExecutionArgs } from '../../core/types/tool-types.js';
 
 export interface ReadFileParams {
     path: string;

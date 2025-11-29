@@ -6,7 +6,7 @@ import { FileUtils } from '../../utils/file-utils.js';
 import { ToolFormatter, type ToolOutput, type ToolPreview } from '../../core/tool-formatter.js';
 import { TempFileUtils } from '../../utils/temp-file-utils.js';
 import { DiffUtils } from '../../utils/diff-utils.js';
-import type { ToolExecutionArgs } from '../../core/types.js';
+import type { ToolExecutionArgs } from '../../core/types/tool-types.js';
 
 export interface WriteFileParams {
     path: string;

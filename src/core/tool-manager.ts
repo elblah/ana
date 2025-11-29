@@ -6,14 +6,21 @@ import type { Stats } from './stats.js';
 import { Config } from './config.js';
 import { FileUtils } from '../utils/file-utils.js';
 import { LogUtils } from '../utils/log-utils.js';
-import { ToolFormatter, type ToolOutput, type ToolPreview } from './tool-formatter.js';
+import { ToolFormatter, type ToolOutput as ToolFormatterOutput, type ToolPreview } from './tool-formatter.js';
 import {
-    type ToolCall,
     type ToolExecutionArgs,
     type ApiRequestData,
     type ToolParameters,
-    ValidationResult,
-} from './types.js';
+} from './types/index.js';
+
+export interface ToolCall {
+    id: string;
+    type: string;
+    function: {
+        name: string;
+        arguments: string;
+    };
+}
 import {
     TOOL_DEFINITION as READ_FILE_DEF,
     type ReadFileParams,
@@ -46,7 +53,7 @@ export interface ToolDefinition {
     description: string;
     parameters: ToolParameters;
     pluginName?: string;
-    execute?: (args: ToolExecutionArgs) => Promise<ToolOutput>;
+    execute?: (args: ToolExecutionArgs) => Promise<ToolFormatterOutput>;
     formatArguments?: (args: ToolExecutionArgs) => string | undefined;
     generatePreview?: (args: ToolExecutionArgs) => Promise<ToolPreview | null> | undefined;
     validateArguments?: (args: ToolExecutionArgs) => void | Promise<void>;
@@ -91,7 +98,7 @@ export class ToolManager {
         name: string,
         description: string,
         parameters: ToolParameters,
-        execute: (args: ToolExecutionArgs) => Promise<ToolOutput>,
+        execute: (args: ToolExecutionArgs) => Promise<ToolFormatterOutput>,
         pluginName: string,
         auto_approved: boolean = false
     ): void {
@@ -142,121 +149,22 @@ export class ToolManager {
         const { name, arguments: args } = func;
 
         try {
-            if (!name || !this.tools.has(name)) {
-                throw new Error(`Unknown tool: ${name}`);
-            }
+            const toolDef = this.validateTool(name);
+            const argsObj = this.parseArguments(args);
 
-            // Get tool definition
-            const toolDef = this.tools.get(name)!;
-            if (toolDef.type !== 'internal' && toolDef.type !== 'plugin') {
-                throw new Error(`External tool ${name} is not supported in this configuration`);
-            }
-
-            let argsObj: ToolExecutionArgs;
-            try {
-                // Handle different argument formats
-                if (!args) {
-                    argsObj = {};
-                } else if (typeof args === 'string') {
-                    if (args.trim() === '') {
-                        argsObj = {};
-                    } else {
-                        argsObj = JSON.parse(args) as ToolExecutionArgs;
-                    }
-                } else if (typeof args === 'object') {
-                    argsObj = args as ToolExecutionArgs;
-                } else {
-                    throw new Error(`Invalid arguments type: ${typeof args}`);
-                }
-            } catch (error) {
-                LogUtils.error(`JSON Parse Error - Raw arguments: ${JSON.stringify(args)}`);
-                const argsStr = typeof args === 'string' ? args : JSON.stringify(args);
-                throw new Error(
-                    `Invalid JSON in tool arguments: ${error}. Raw arguments: ${argsStr?.substring(0, 200) || 'undefined'}${argsStr && argsStr.length > 200 ? '...' : ''}`
-                );
-            }
-
-            // Call plugin beforeTool hook
-            const hookResult = pluginSystem.beforeToolCall(name!, argsObj);
-            if (hookResult === false) {
-                // Plugin wants to cancel the tool call
-                return {
-                    tool_call_id: id,
-                    content: `Tool call ${name} cancelled by plugin`,
-                };
+            // Handle plugin hooks
+            const cancelResult = await this.handlePluginHooks(name!, argsObj, id);
+            if (cancelResult) {
+                return cancelResult;
             }
 
             // Validate required arguments for each tool
             await this.validateToolArguments(name!, argsObj);
 
-            // Execute the appropriate tool using dynamic execution
-            let toolOutput: ToolOutput;
-            try {
-                const toolDef = this.tools.get(name);
-                if (!toolDef || !toolDef.execute) {
-                    throw new Error(`Tool ${name} not found or has no execute method`);
-                }
+            // Execute the appropriate tool
+            const toolOutput = await this.executeTool(name!, argsObj, toolDef);
 
-                toolOutput = await toolDef.execute(argsObj);
-
-                // Track that we read this file (special case for read_file)
-                if (name === 'read_file' && argsObj.path && typeof argsObj.path === 'string') {
-                    this.readFiles.add(argsObj.path);
-                }
-            } catch (execError) {
-                throw new Error(
-                    `Tool execution failed for ${name}: ${execError instanceof Error ? execError.message : String(execError)}`
-                );
-            }
-
-            // Format for AI
-            let aiResult = ToolFormatter.formatForAI(toolOutput);
-
-            // Get friendly message for display
-            const friendlyResult = ToolFormatter.formatForDisplay(toolOutput);
-
-            // Call plugin afterTool hook
-            const modifiedOutput = pluginSystem.afterToolCall(name, toolOutput);
-            if (modifiedOutput !== undefined) {
-                // Plugin modified the ToolOutput object
-                const modifiedAiResult = ToolFormatter.formatForAI(
-                    modifiedOutput as unknown as ToolOutput
-                );
-                const modifiedFriendlyResult = ToolFormatter.formatForDisplay(
-                    modifiedOutput as unknown as ToolOutput
-                );
-                return {
-                    tool_call_id: id,
-                    content: modifiedAiResult,
-                    friendly: modifiedFriendlyResult || undefined,
-                };
-            }
-
-            // Check if result is too large
-            const resultSize = Buffer.byteLength(aiResult, 'utf8');
-            if (resultSize > Config.maxToolResultSize) {
-                if (toolDef.description.includes('file')) {
-                    aiResult = `ERROR: File content too large (${resultSize} bytes). Maximum ${Config.maxToolResultSize} bytes allowed. Use alternative approach to read specific portions of the file.`;
-                } else if (toolDef.description.includes('command')) {
-                    aiResult = `ERROR: Command output too large (${resultSize} bytes). Maximum ${Config.maxToolResultSize} bytes allowed. Use command options to limit output size.`;
-                } else if (toolDef.description.includes('directory')) {
-                    aiResult = `ERROR: Directory listing too large (${resultSize} bytes). Maximum ${Config.maxToolResultSize} bytes allowed. Navigate to a more specific subdirectory or filter results.`;
-                } else {
-                    aiResult = `ERROR: Tool result too large (${resultSize} bytes). Maximum ${Config.maxToolResultSize} bytes allowed.`;
-                }
-
-                if (Config.debug) {
-                    console.log(
-                        `*** Tool result from '${name}' replaced due to size (${resultSize} > ${Config.maxToolResultSize} limit)`
-                    );
-                }
-            }
-
-            return {
-                tool_call_id: id,
-                content: aiResult,
-                friendly: friendlyResult || undefined,
-            };
+            return this.formatResult(toolOutput, toolDef, name!, id);
         } catch (error) {
             return {
                 tool_call_id: id,
@@ -413,6 +321,150 @@ export class ToolManager {
         return Array.from(this.tools.entries())
             .filter(([_, toolDef]) => toolDef.type === 'internal')
             .map(([name, _]) => name);
+    }
+
+    /**
+     * Parse and validate tool arguments
+     */
+    private parseArguments(args: string | ToolExecutionArgs | undefined): ToolExecutionArgs {
+        if (!args) {
+            return {};
+        }
+
+        if (typeof args === 'string') {
+            if (args.trim() === '') {
+                return {};
+            }
+            try {
+                return JSON.parse(args) as ToolExecutionArgs;
+            } catch (error) {
+                LogUtils.error(`JSON Parse Error - Raw arguments: ${JSON.stringify(args)}`);
+                const argsStr = args;
+                throw new Error(
+                    `Invalid JSON in tool arguments: ${error}. Raw arguments: ${argsStr?.substring(0, 200) || 'undefined'}${argsStr && argsStr.length > 200 ? '...' : ''}`
+                );
+            }
+        }
+
+        if (typeof args === 'object') {
+            return args as ToolExecutionArgs;
+        }
+
+        throw new Error(`Invalid arguments type: ${typeof args}`);
+    }
+
+    /**
+     * Validate tool exists and is supported
+     */
+    private validateTool(name: string): ToolDefinition {
+        if (!name || !this.tools.has(name)) {
+            throw new Error(`Unknown tool: ${name}`);
+        }
+
+        const toolDef = this.tools.get(name)!;
+        if (toolDef.type !== 'internal' && toolDef.type !== 'plugin') {
+            throw new Error(`External tool ${name} is not supported in this configuration`);
+        }
+
+        return toolDef;
+    }
+
+    /**
+     * Handle plugin hooks and return cancellation result if needed
+     */
+    private async handlePluginHooks(name: string, argsObj: ToolExecutionArgs, toolCallId: string): Promise<ToolResult | null> {
+        // Call plugin beforeTool hook
+        const hookResult = pluginSystem.beforeToolCall(name, argsObj);
+        if (hookResult === false) {
+            // Plugin wants to cancel the tool call
+            return {
+                tool_call_id: toolCallId,
+                content: `Tool call ${name} cancelled by plugin`,
+            };
+        }
+        return null;
+    }
+
+    /**
+     * Execute tool and handle tracking
+     */
+    private async executeTool(name: string, argsObj: ToolExecutionArgs, toolDef: ToolDefinition): Promise<ToolFormatterOutput> {
+        try {
+            if (!toolDef.execute) {
+                throw new Error(`Tool ${name} has no execute method`);
+            }
+
+            const toolOutput = await toolDef.execute(argsObj);
+
+            // Track that we read this file (special case for read_file)
+            if (name === 'read_file' && argsObj.path && typeof argsObj.path === 'string') {
+                this.readFiles.add(argsObj.path);
+            }
+
+            return toolOutput;
+        } catch (execError) {
+            throw new Error(
+                `Tool execution failed for ${name}: ${execError instanceof Error ? execError.message : String(execError)}`
+            );
+        }
+    }
+
+    /**
+     * Format result for AI and display, handling plugin hooks
+     */
+    private formatResult(toolOutput: ToolFormatterOutput, toolDef: ToolDefinition, toolName: string, toolCallId: string): ToolResult {
+        // Call plugin afterTool hook
+        const modifiedOutput = pluginSystem.afterToolCall(toolName, toolOutput);
+        if (modifiedOutput !== undefined) {
+            const modifiedAiResult = ToolFormatter.formatForAI(
+                modifiedOutput as unknown as ToolOutput
+            );
+            const modifiedFriendlyResult = ToolFormatter.formatForDisplay(
+                modifiedOutput as unknown as ToolOutput
+            );
+            return {
+                tool_call_id: toolCallId,
+                content: modifiedAiResult,
+                friendly: modifiedFriendlyResult || undefined,
+            };
+        }
+
+        // Format for AI and display
+        let aiResult = ToolFormatter.formatForAI(toolOutput);
+        const friendlyResult = ToolFormatter.formatForDisplay(toolOutput);
+
+        // Check if result is too large
+        aiResult = this.checkSize(aiResult, toolDef, toolName);
+
+        return {
+            tool_call_id: toolCallId,
+            content: aiResult,
+            friendly: friendlyResult || undefined,
+        };
+    }
+
+    /**
+     * Check if result is too large and truncate if needed
+     */
+    private checkSize(aiResult: string, toolDef: ToolDefinition, toolName: string): string {
+        const resultSize = Buffer.byteLength(aiResult, 'utf8');
+        if (resultSize <= Config.maxToolResultSize) {
+            return aiResult;
+        }
+
+        if (toolDef.description.includes('file')) {
+            return `ERROR: File content too large (${resultSize} bytes). Maximum ${Config.maxToolResultSize} bytes allowed. Use alternative approach to read specific portions of the file.`;
+        }
+        
+        if (toolDef.description.includes('command')) {
+            return `ERROR: Command output too large (${resultSize} bytes). Maximum ${Config.maxToolResultSize} bytes allowed. Use command options to limit output size.`;
+        }
+        
+        if (toolDef.description.includes('directory')) {
+            return `ERROR: Directory listing too large (${resultSize} bytes). Maximum ${Config.maxToolResultSize} bytes allowed. Navigate to a more specific subdirectory or filter results.`;
+        }
+
+        return `ERROR: Tool result too large (${resultSize} bytes). Maximum ${Config.maxToolResultSize} bytes allowed.`;
     }
 
     /**

@@ -7,7 +7,7 @@ import { FileUtils } from '../../utils/file-utils.js';
 import { resolve } from 'node:path';
 import { ToolFormatter, type ToolOutput } from '../../core/tool-formatter.js';
 import { ShellUtils } from '../../utils/shell-utils.js';
-import type { ToolExecutionArgs } from '../../core/types.js';
+import type { ToolExecutionArgs } from '../../core/types/tool-types.js';
 
 // Maximum number of files to return to prevent overwhelming output
 const MAX_FILES = 100;

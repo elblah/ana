@@ -7,8 +7,13 @@ import type { Stats } from './stats.js';
 import { CompactionService } from './compaction-service.js';
 import { Config } from './config.js';
 import { estimateMessagesTokens, clearTokenCache, estimateTokens } from './token-estimator.js';
-import type { MessageToolCall, AssistantMessage, ToolResultData } from './types.js';
-import type { StreamingClient } from './streaming-client.js';
+import type { 
+    Message, 
+    MessageToolCall, 
+    AssistantMessage, 
+    ToolResultData,
+    StreamingClient
+} from './types/index.js';
 
 /**
  * Message used to replace pruned tool result content
@@ -21,12 +26,7 @@ export const PRUNED_TOOL_MESSAGE = '[Old tool result content cleared due to memo
  */
 export const PRUNE_PROTECTION_THRESHOLD = 256; // bytes
 
-export interface Message {
-    role: 'system' | 'user' | 'assistant' | 'tool';
-    content?: string;
-    tool_calls?: MessageToolCall[];
-    tool_call_id?: string;
-}
+// Message interface is now exported from central types.ts
 
 export class MessageHistory {
     private messages: Message[] = [];

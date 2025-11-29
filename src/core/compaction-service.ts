@@ -4,9 +4,11 @@
  */
 
 import { LogUtils } from '../utils/log-utils.js';
-import type { Message } from './message-history.js';
-import type { MessageToolCall } from './types.js';
-import type { StreamingClient } from './streaming-client.js';
+import type { 
+    Message, 
+    MessageToolCall,
+    StreamingClient
+} from './types/index.js';
 import { Config } from './config.js';
 import { AIProcessor } from './ai-processor.js';
 

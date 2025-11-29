@@ -8,18 +8,18 @@ set -e
 COUNCIL_DIR="$HOME/.config/aicoder-mini/council"
 EXAMPLE_DIR="$(dirname "$0")"
 
-echo "🏛️ Setting up AI Coder Council..."
+echo "Setting up AI Coder Council..."
 
 # Create council directory
 if [ ! -d "$COUNCIL_DIR" ]; then
     mkdir -p "$COUNCIL_DIR"
     echo "✓ Created council directory: $COUNCIL_DIR"
 else
-    echo "ℹ️  Council directory already exists: $COUNCIL_DIR"
+    echo "Council directory already exists: $COUNCIL_DIR"
 fi
 
 # Copy essential members
-echo "📋 Copying council members..."
+echo "Copying council members..."
 
 # Required: Moderator
 if [ -f "$EXAMPLE_DIR/moderator.txt" ]; then
@@ -36,7 +36,7 @@ for file in preidea_simplicity_advocate.txt preidea_security_expert.txt; do
 done
 
 # Optional: More specialized members
-read -p "🤔 Include UX Designer? (y/N): " include_ux
+read -p "Include UX Designer? (y/N): " include_ux
 if [[ $include_ux =~ ^[Yy]$ ]]; then
     if [ -f "$EXAMPLE_DIR/preidea_ux_designer.txt" ]; then
         cp "$EXAMPLE_DIR/preidea_ux_designer.txt" "$COUNCIL_DIR/"
@@ -44,7 +44,7 @@ if [[ $include_ux =~ ^[Yy]$ ]]; then
     fi
 fi
 
-read -p "🔍 Include Performance Guru? (y/N): " include_perf
+read -p "Include Performance Guru? (y/N): " include_perf
 if [[ $include_perf =~ ^[Yy]$ ]]; then
     if [ -f "$EXAMPLE_DIR/preidea_performance_guru.txt" ]; then
         cp "$EXAMPLE_DIR/preidea_performance_guru.txt" "$COUNCIL_DIR/"
@@ -52,7 +52,7 @@ if [[ $include_perf =~ ^[Yy]$ ]]; then
     fi
 fi
 
-read -p "⚖️  Include Feasibility Checker? (y/N): " include_feasibility
+read -p "Include Feasibility Checker? (y/N): " include_feasibility
 if [[ $include_feasibility =~ ^[Yy]$ ]]; then
     if [ -f "$EXAMPLE_DIR/preidea_feasibility_checker.txt" ]; then
         cp "$EXAMPLE_DIR/preidea_feasibility_checker.txt" "$COUNCIL_DIR/"
@@ -60,7 +60,7 @@ if [[ $include_feasibility =~ ^[Yy]$ ]]; then
     fi
 fi
 
-read -p "🧪 Include Code Reviewer (post-implementation)? (y/N): " include_code
+read -p "Include Code Reviewer (post-implementation)? (y/N): " include_code
 if [[ $include_code =~ ^[Yy]$ ]]; then
     if [ -f "$EXAMPLE_DIR/posimplementation_code_reviewer.txt" ]; then
         cp "$EXAMPLE_DIR/posimplementation_code_reviewer.txt" "$COUNCIL_DIR/"
@@ -72,15 +72,15 @@ fi
 member_count=$(ls -1 "$COUNCIL_DIR"/*.txt 2>/dev/null | wc -l)
 
 echo ""
-echo "🎉 Council setup complete!"
-echo "📁 Location: $COUNCIL_DIR"
-echo "👥 Members installed: $member_count"
+echo "Council setup complete!"
+echo "Location: $COUNCIL_DIR"
+echo "Members installed: $member_count"
 echo ""
-echo "💡 Usage examples:"
+echo "Usage examples:"
 echo "  /council                    # All members"
 echo "  /council preidea            # Pre-idea members only"
 echo "  /council preidea,security   # Security + pre-idea"
 echo "  /council current            # Show current plan"
 echo "  /council accept             # Accept and inject plan"
 echo ""
-echo "📚 See README.md for detailed usage instructions"
+echo "See README.md for detailed usage instructions"

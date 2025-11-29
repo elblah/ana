@@ -5,7 +5,7 @@
 import { Config } from '../../core/config.js';
 import { ToolFormatter, type ToolOutput } from '../../core/tool-formatter.js';
 import { ShellUtils, type ShellResult } from '../../utils/shell-utils.js';
-import type { ToolExecutionArgs } from '../../core/types.js';
+import type { ToolExecutionArgs } from '../../core/types/tool-types.js';
 
 export interface RunShellCommandParams {
     command: string;
@@ -82,7 +82,7 @@ export async function executeRunShellCommand(
         const friendlyMessage = result.success
             ? `✓ Command completed (exit code: ${result.exitCode})`
             : result.exitCode === 124
-              ? `⏱️ Command timed out after ${timeout}s (exit code: 124)`
+              ? `Command timed out after ${timeout}s (exit code: 124)`
               : `✗ Command failed (exit code: ${result.exitCode})`;
 
         return {

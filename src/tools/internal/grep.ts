@@ -7,7 +7,7 @@ import { FileUtils } from '../../utils/file-utils.js';
 import { spawn } from 'node:child_process';
 import { resolve } from 'node:path';
 import { ToolFormatter, type ToolOutput } from '../../core/tool-formatter.js';
-import type { ToolExecutionArgs } from '../../core/types.js';
+import type { ToolExecutionArgs } from '../../core/types/tool-types.js';
 
 export interface GrepParams {
     text: string;

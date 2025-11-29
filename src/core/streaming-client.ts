@@ -5,21 +5,16 @@
 import { Config } from './config.js';
 import type { Stats } from './stats.js';
 import { LogUtils } from '../utils/log-utils.js';
-import type { Message } from './message-history.js';
+import type { 
+    Message, 
+    MessageToolCall,
+    ApiUsage, 
+    ApiRequestData, 
+    UnknownError,
+    StreamChunk
+} from './types/index.js';
 import type { ToolManager } from './tool-manager.js';
 import { MarkdownColorizer } from './markdown-colorizer.js';
-import { type ApiUsage, type MessageToolCall, type ApiRequestData, UnknownError } from './types.js';
-
-export interface StreamChunk {
-    choices?: Array<{
-        delta?: {
-            content?: string;
-            tool_calls?: MessageToolCall[];
-        };
-        finish_reason?: string;
-    }>;
-    usage?: ApiUsage;
-}
 
 export interface ToolCall {
     id: string;

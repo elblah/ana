@@ -10,7 +10,7 @@ import type { Stats } from './stats.js';
 import { PromptHistory } from './prompt-history.js';
 import { ContextBar } from './context-bar.js';
 import { getSnippetNames } from './snippet-utils.js';
-import type { ReadlineInterface, CompletionCallback } from './types.js';
+import type { ReadlineInterface, CompletionCallback } from './types/index.js';
 import type { MessageHistory } from './message-history.js';
 import { DateTimeUtils } from '../utils/datetime-utils.js';
 import { JsonUtils } from '../utils/json-utils.js';
