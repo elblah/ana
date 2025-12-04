@@ -22,6 +22,7 @@ import type {
     ToolExecutionArgs,
     ConfigValue,
     NotificationHooks,
+    PopupMenuItem,
 } from './types/index.js';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -89,6 +90,10 @@ export interface PluginContext {
 
     // Notification hooks (optional)
     registerNotifyHooks?(hooks: NotificationHooks): void;
+
+    // Popup menu items
+    registerPopupMenuItem(item: PopupMenuItem): void;
+    unregisterPopupMenuItem(key: string): void;
 }
 
 /**
@@ -100,6 +105,7 @@ export type CreatePluginFunction = (context: PluginContext) => Plugin;
 class PluginSystem {
     private plugins: Map<string, Plugin> = new Map();
     private tools: Map<string, PluginTool> = new Map();
+    private popupMenuItems: Map<string, PopupMenuItem> = new Map();
     private context: PluginContext;
 
     constructor() {
@@ -219,21 +225,27 @@ class PluginSystem {
             typeof (obj as Plugin).description === 'string') as boolean;
     }
 
+    private configStore: Map<string, ConfigValue> = new Map();
+
     /**
      * Create plugin context
      */
     private createContext(): PluginContext {
-        // Will be properly initialized when AICoder integrates
+        const self = this;
+        
         return {
             config: Config,
             registerCommand: () => {},
             addUserMessage: () => {},
             addSystemMessage: () => {},
-            getConfig: () => undefined,
-            setConfig: () => {},
+            getConfig: (key: string) => self.configStore.get(key),
+            setConfig: (key: string, value: ConfigValue) => self.configStore.set(key, value),
             originalWriteFile: async () => '',
             originalEditFile: async () => '',
             app: undefined,
+            registerNotifyHooks: () => {},
+            registerPopupMenuItem: (item: PopupMenuItem) => self.registerPopupMenuItem(item),
+            unregisterPopupMenuItem: (key: string) => this.unregisterPopupMenuItem(key),
         };
     }
 
@@ -400,6 +412,41 @@ class PluginSystem {
     }
 
     /**
+     * Register a popup menu item
+     */
+    registerPopupMenuItem(item: PopupMenuItem): void {
+        this.popupMenuItems.set(item.key, item);
+    }
+
+    /**
+     * Unregister a popup menu item
+     */
+    unregisterPopupMenuItem(key: string): void {
+        this.popupMenuItems.delete(key);
+    }
+
+    /**
+     * Update a popup menu item (useful for dynamic labels like status)
+     */
+    updatePopupMenuItem(item: PopupMenuItem): void {
+        this.popupMenuItems.set(item.key, item);
+    }
+
+    /**
+     * Get all popup menu items
+     */
+    getPopupMenuItems(): Map<string, PopupMenuItem> {
+        return new Map(this.popupMenuItems);
+    }
+
+    /**
+     * Get all plugins
+     */
+    getPlugins(): Map<string, Plugin> {
+        return new Map(this.plugins);
+    }
+
+    /**
      * Cleanup all plugins synchronously
      */
     cleanup(): void {
@@ -415,6 +462,7 @@ class PluginSystem {
 
         this.plugins.clear();
         this.tools.clear();
+        this.popupMenuItems.clear();
     }
 }
 

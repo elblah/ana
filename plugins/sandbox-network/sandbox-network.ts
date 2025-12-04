@@ -6,6 +6,7 @@
  */
 
 import type { Plugin, PluginContext } from '../../src/core/plugin-system.js';
+import type { PopupMenuItem } from '../../src/core/types/index.js';
 import type { ToolCall } from '../../src/core/streaming-client.js';
 
 // Seccomp C source code (embedded)
@@ -92,6 +93,33 @@ export default function createSandboxNetworkPlugin(ctx: PluginContext): Plugin {
     let enabled = false;
     let compiledExecutable: string | null = null;
     let compilationInProgress = false;
+
+    // Register popup menu item
+    const updatePopupMenuItem = () => {
+        const status = enabled ? 'ON' : 'OFF';
+        ctx.registerPopupMenuItem({
+            label: `Toggle Net Sandbox (${status})`,
+            key: 'n',
+            handler: () => {
+                enabled = !enabled;
+                const enabledStr = enabled ? 'true' : 'false';
+                ctx.setConfig('sandbox_network.enabled', enabledStr);
+                updatePopupMenuItem(); // Update the menu item label
+                
+                const statusText = enabled ? 'ENABLED' : 'DISABLED';
+                console.log(`[*] Network sandbox ${statusText}`);
+                
+                // Verify config was set correctly
+                const configValue = ctx.getConfig('sandbox_network.enabled');
+                if (configValue !== enabledStr) {
+                    console.log(`[!] Warning: Config mismatch. Expected ${enabledStr}, got ${configValue}`);
+                }
+            },
+        });
+    };
+
+    // Initial registration
+    updatePopupMenuItem();
 
     // Check requirements
     async function checkRequirements(): Promise<{ ok: boolean; missing: string[] }> {
@@ -281,13 +309,15 @@ export default function createSandboxNetworkPlugin(ctx: PluginContext): Plugin {
                 enabled = true;
                 console.log('[+] Network sandbox enabled');
                 console.log('    [INFO] Seccomp binary will be compiled on first shell command');
-                ctx.setConfig('sandbox_network.enabled', true);
+                ctx.setConfig('sandbox_network.enabled', 'true');
+                updatePopupMenuItem();
                 break;
 
             case 'off':
                 enabled = false;
                 console.log('[-] Network sandbox disabled');
-                ctx.setConfig('sandbox_network.enabled', false);
+                ctx.setConfig('sandbox_network.enabled', 'false');
+                updatePopupMenuItem();
                 break;
 
             case 'status': {
@@ -330,9 +360,14 @@ Requirements:
 
     // Load saved state
     const savedEnabled = ctx.getConfig('sandbox_network.enabled');
-    if (typeof savedEnabled === 'boolean') {
+    if (typeof savedEnabled === 'string') {
+        enabled = savedEnabled === 'true';
+    } else if (typeof savedEnabled === 'boolean') {
         enabled = savedEnabled;
     }
+    
+    // Update popup menu item with loaded state
+    updatePopupMenuItem();
 
     // Check requirements on startup
     checkRequirements().then((reqs) => {

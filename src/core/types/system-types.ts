@@ -78,6 +78,8 @@ export interface PluginContext {
     originalEditFile(path: string, oldStr: string, newStr: string): Promise<void>;
     app: Record<string, unknown>;
     registerNotifyHooks(hooks: NotificationHooks): void;
+    registerPopupMenuItem(item: PopupMenuItem): void;
+    unregisterPopupMenuItem(key: string): void;
 }
 
 import type { CommandResult } from './tool-types.js';
@@ -92,6 +94,20 @@ export interface NotificationHooks {
 }
 
 export type HookName = keyof NotificationHooks;
+
+// ============================================================================
+// POPUP MENU TYPES - Dynamic popup menu items
+// ============================================================================
+
+export interface PopupMenuItem {
+    label: string;
+    key: string;
+    handler: () => void | Promise<void>;
+}
+
+export interface PopupMenuProvider {
+    getMenuItems(): PopupMenuItem[];
+}
 
 // ============================================================================
 // COUNCIL TYPES - AI expert system

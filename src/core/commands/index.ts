@@ -9,4 +9,5 @@ export { LoadCommand } from './load.js';
 export { CompactCommand } from './compact.js';
 export { SandboxCommand } from './sandbox.js';
 export { EditCommand } from './edit.js';
+export { ModelCommand, ModelBackCommand } from './model.js';
 export { CommandRegistry } from './registry.js';

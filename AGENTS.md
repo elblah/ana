@@ -4,7 +4,7 @@
 - **investigate the code before answering the user NEVER GUESS**
 - readability is a MUST (don't overcomplicate)
 - avoid else (DO guard clauses)
-- create tests for every feature
+- create tests for every feature (keep tests in the tests folder in the project root)
 - this is a RPI3 environment (think ultra lightweight solutions)
 - no external deps policy
 - be through always do as much as you can to complete the task

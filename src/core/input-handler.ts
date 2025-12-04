@@ -16,6 +16,10 @@ import { DateTimeUtils } from '../utils/datetime-utils.js';
 import { JsonUtils } from '../utils/json-utils.js';
 import { ShellUtils } from '../utils/shell-utils.js';
 import { FileUtils } from '../utils/file-utils.js';
+import { pluginSystem } from './plugin-system.js';
+import type { PopupMenuItem } from './types/index.js';
+
+
 
 export class InputHandler {
     private history: string[] = [];
@@ -25,6 +29,7 @@ export class InputHandler {
     private promptHistory: PromptHistory;
     private contextBar: ContextBar | null = null;
     private messageHistory: MessageHistory | null = null; // Will be set via setMessageHistory
+    private pluginSystem = pluginSystem;
 
     constructor() {
         this.promptHistory = new PromptHistory();
@@ -139,15 +144,62 @@ export class InputHandler {
         const tempFile = TempFileUtils.createTempFile('aicoder-menu', '.txt');
 
         try {
-            // Build the tmux display-menu command
-            const tmuxCommand = `tmux display-menu -t . -T "AI Coder Menu" \\
-        "Toggle Detail" "d" "run-shell 'echo d > ${tempFile}'" \\
-        "Stop Processing" "s" "run-shell 'echo s > ${tempFile}'" \\
-        "Toggle YOLO" "y" "run-shell 'echo y > ${tempFile}'" \\
-        "Prune Context" "p" "run-shell 'echo p > ${tempFile}'" \\
-        "Show Stats" "t" "run-shell 'echo t > ${tempFile}'" \\
-        "Save Session" "e" "run-shell 'echo e > ${tempFile}'" \\
-        "Quit" "q" "run-shell 'echo q > ${tempFile}'"`;
+            // Build base menu items
+            const baseItems: PopupMenuItem[] = [
+                {
+                    label: `Toggle Detail (${Config.detailMode ? 'ON' : 'OFF'})`,
+                    key: 'd',
+                    handler: () => this.handleToggleDetail(),
+                },
+                {
+                    label: 'Stop Processing',
+                    key: 's',
+                    handler: () => this.handleStopProcessing(),
+                },
+                {
+                    label: `Toggle YOLO (${Config.yoloMode ? 'ON' : 'OFF'})`,
+                    key: 'y',
+                    handler: () => this.handleToggleYolo(),
+                },
+                {
+                    label: `Toggle FS Sandbox (${Config.sandboxDisabled ? 'OFF' : 'ON'})`,
+                    key: 'f',
+                    handler: () => this.handleToggleFsSandbox(),
+                },
+                {
+                    label: 'Prune Context',
+                    key: 'p',
+                    handler: () => this.handlePruneContext(),
+                },
+                {
+                    label: 'Show Stats',
+                    key: 't',
+                    handler: () => this.handleShowStats(),
+                },
+                {
+                    label: 'Save Session',
+                    key: 'e',
+                    handler: async () => await this.handleSaveSession(),
+                },
+                {
+                    label: 'Quit',
+                    key: 'q',
+                    handler: () => this.handleQuit(),
+                },
+            ];
+
+            // Get plugin menu items
+            const pluginItems = Array.from(this.pluginSystem.getPopupMenuItems().values());
+
+            // Combine all items
+            const allItems = [...baseItems, ...pluginItems];
+
+            // Build tmux display-menu command
+            const menuItems = allItems.map(item => 
+                `"${item.label}" "${item.key}" "run-shell 'echo ${item.key} > ${tempFile}'"`
+            ).join(' \\\n        ');
+
+            const tmuxCommand = `tmux display-menu -t . -T "AI Coder Menu" \\\n        ${menuItems}`;
 
             // Execute the tmux command to show the menu
             const result = await ShellUtils.executeCommand(tmuxCommand);
@@ -194,42 +246,72 @@ export class InputHandler {
         }
     }
 
+
+
     /**
      * Process the selected menu option
      */
     private async processMenuSelection(selection: string): Promise<void> {
-        switch (selection.toLowerCase()) {
+        const selectionKey = selection.toLowerCase();
+        let handled = false;
+
+        // Check base menu items first
+        switch (selectionKey) {
             case 'd':
                 this.handleToggleDetail();
+                handled = true;
                 break;
 
             case 's':
                 this.handleStopProcessing();
+                handled = true;
                 break;
 
             case 'y':
                 this.handleToggleYolo();
+                handled = true;
+                break;
+
+            case 'f':
+                this.handleToggleFsSandbox();
+                handled = true;
                 break;
 
             case 'p':
                 this.handlePruneContext();
+                handled = true;
                 break;
 
             case 't':
                 this.handleShowStats();
+                handled = true;
                 break;
 
             case 'e':
                 await this.handleSaveSession();
+                handled = true;
                 break;
 
             case 'q':
                 this.handleQuit();
+                handled = true;
                 break;
+        }
 
-            default:
+        // If not handled by base items, check plugin items
+        if (!handled) {
+            const pluginItems = this.pluginSystem.getPopupMenuItems();
+            const pluginItem = pluginItems.get(selectionKey);
+            
+            if (pluginItem) {
+                try {
+                    await pluginItem.handler();
+                } catch (error) {
+                    LogUtils.error(`[Menu plugin error: ${(error as Error).message}]`);
+                }
+            } else {
                 this.handleUnknownSelection();
-                break;
+            }
         }
     }
 
@@ -262,6 +344,21 @@ export class InputHandler {
             color: newYoloState ? Config.colors.green : Config.colors.red,
         });
     }
+
+    /**
+     * Toggle filesystem sandbox
+     */
+    private handleToggleFsSandbox(): void {
+        const currentState = Config.sandboxDisabled;
+        const newState = !currentState;
+        Config.setSandboxDisabled(newState);
+        const status = newState ? 'DISABLED' : 'ENABLED';
+        LogUtils.print(`\n[*] FS sandbox ${status}`, {
+            color: !newState ? Config.colors.green : Config.colors.red,
+        });
+    }
+
+
 
     /**
      * Prune a percentage of tool call results (only large ones >256 bytes)

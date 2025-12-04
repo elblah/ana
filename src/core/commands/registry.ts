@@ -10,6 +10,7 @@ import { LoadCommand } from './load.js';
 import { CompactCommand } from './compact.js';
 import { SandboxCommand } from './sandbox.js';
 import { EditCommand } from './edit.js';
+import { ModelCommand, ModelBackCommand } from './model.js';
 import { RetryCommand } from './retry.js';
 import { MemoryCommand } from './memory.js';
 import { YoloCommand } from './yolo.js';
@@ -40,6 +41,8 @@ export class CommandRegistry {
         const detailCmd = new DetailCommand(context);
         const snippetsCmd = new SnippetsCommand(context);
         const councilCmd = new CouncilCommand(context);
+        const modelCmd = new ModelCommand(context);
+        const modelBackCmd = new ModelBackCommand(context);
 
         this.registerCommand(helpCmd);
         this.registerCommand(quitCmd);
@@ -52,6 +55,8 @@ export class CommandRegistry {
         this.registerCommand(sandboxCmd);
         this.registerCommand(councilCmd);
         this.registerCommand(editCmd);
+        this.registerCommand(modelCmd);
+        this.registerCommand(modelBackCmd);
         this.registerCommand(retryCmd);
         this.registerCommand(memoryCmd);
         this.registerCommand(snippetsCmd);

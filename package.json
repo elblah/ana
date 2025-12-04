@@ -15,7 +15,8 @@
     "format:check": "bun biome format .",
     "lint": "bun biome lint .",
     "lint:fix": "bun biome lint --write .",
-    "check": "bun run type-check && bun run lint:fix && bun run format:check && bun test"
+    "check": "bun run type-check && bun run lint:fix && bun run format:check && bun test",
+    "compile": "bun build --compile --minify src/index.ts"
   },
   "bin": {
     "aicoder-mini": "./bin/aicoder-mini"

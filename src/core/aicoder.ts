@@ -38,9 +38,7 @@ export class AICoder {
     private isRunning = true;
     private isProcessing = false;
     private approvalWasShown = false;
-    private lastSigintTime = 0;
-    private sigintWarningShown = false;
-    private signalDebounceTimeout: NodeJS.Timeout | null = null;
+    
     private notifyHooks: NotificationHooks | null = null;
 
     constructor() {
@@ -92,7 +90,6 @@ export class AICoder {
         pluginSystem.setContext({
             config: Config,
             registerCommand: (name, handler, description) => {
-                LogUtils.debug(`[DEBUG] Registering command: ${name}`);
                 this.commandHandler.registerCommand(name, handler, description);
             },
             addUserMessage: (message) => this.messageHistory.addUserMessage(message),
@@ -108,13 +105,9 @@ export class AICoder {
             app: this as Record<string, unknown>,
             registerNotifyHooks: (hooks: NotificationHooks) => this.registerNotifyHooks(hooks),
         });
-
-        LogUtils.debug('[DEBUG] Plugin context connected, now loading plugins...');
     }
 
     private addPluginTools(): void {
-        LogUtils.debug('[DEBUG] Plugins loaded, adding tools...');
-
         const pluginTools = pluginSystem.getAllTools();
         for (const [toolName, tool] of pluginTools) {
             this.toolManager.addPluginTool(
@@ -132,45 +125,20 @@ export class AICoder {
      * Simple signal handler
      */
     private handleSignal = (): void => {
-        // Clear existing timeout
-        if (this.signalDebounceTimeout) {
-            clearTimeout(this.signalDebounceTimeout);
+        // First signal - interrupt processing if active
+        if (this.isProcessing) {
+            LogUtils.warn(`\n[*] Process interrupted - please wait`);
+            LogUtils.print(
+                `[*] Press Ctrl+C again to exit or wait for prompt`,
+                { color: Config.colors.cyan }
+            );
+            this.isProcessing = false;
+            return;
         }
-
-        this.signalDebounceTimeout = setTimeout(() => {
-            const now = Date.now();
-            const timeSinceLast = now - this.lastSigintTime;
-
-            // Second signal after 1 second - exit
-            if (this.sigintWarningShown && timeSinceLast >= 1000) {
-                LogUtils.success('\n[*] Exiting gracefully');
-                process.exit(0);
-            }
-
-            // Signal pressed too quickly - show wait time
-            if (this.sigintWarningShown && timeSinceLast < 1000) {
-                const waitTime = Math.ceil((1000 - timeSinceLast) / 100) / 10;
-                if (this.isProcessing) {
-                    LogUtils.warn(
-                        `\n[!] Please wait ${waitTime}s before pressing Ctrl+C again to exit`
-                    );
-                }
-                return;
-            }
-
-            // First signal - only show if AI is processing
-            if (this.isProcessing) {
-                LogUtils.warn(`\n[*] Process interrupted - please wait`);
-                LogUtils.print(
-                    `[*] Press Ctrl+C again (after 1 second) to exit or wait for prompt`,
-                    { color: Config.colors.cyan }
-                );
-                this.isProcessing = false;
-            }
-
-            this.lastSigintTime = now;
-            this.sigintWarningShown = true;
-        }, 100); // Debounce duplicates
+        
+        // Second signal - exit gracefully
+        LogUtils.success('\n[*] Exiting gracefully');
+        process.exit(0);
     };
 
     /**
@@ -272,20 +240,7 @@ export class AICoder {
         });
     }
 
-    private debugToolCalls(toolCalls: ToolCall[]): void {
-        if (!Config.debug) return;
 
-        LogUtils.print(`Tool calls accumulated: ${toolCalls.length}`, {
-            color: Config.colors.yellow,
-        });
-        for (const tc of toolCalls) {
-            const argsPreview = tc.function.arguments.substring(0, 100);
-            const ellipsis = tc.function.arguments.length > 100 ? '...' : '';
-            LogUtils.print(`- ${tc.function.name}: ${argsPreview}${ellipsis}`, {
-                color: Config.colors.yellow,
-            });
-        }
-    }
 
     private validateToolCalls(toolCalls: ToolCall[]): ToolCall[] {
         return toolCalls.filter((toolCall) => {
@@ -298,10 +253,6 @@ export class AICoder {
     }
 
     private handleEmptyResponse(fullResponse: string): void {
-        if (Config.debug) {
-            LogUtils.debug(`*** handleEmptyResponse called with: "${fullResponse}" (length: ${fullResponse?.length || 0})`, Config.colors.yellow);
-        }
-        
         if (fullResponse && fullResponse.trim() !== '') {
             // AI provided text response but no tools
             this.messageHistory.addAssistantMessage({ content: fullResponse });
@@ -347,11 +298,7 @@ export class AICoder {
                 await this.callNotifyHook('onBeforeUserPrompt');
                 const userInput = await this.inputHandler.getUserInput();
 
-                // Reset interrupt warning state when we get valid input
-                if (userInput) {
-                    this.sigintWarningShown = false;
-                    this.lastSigintTime = 0;
-                }
+                
 
                 const trimmedInput = userInput.trim();
                 if (!trimmedInput) {
@@ -446,8 +393,6 @@ export class AICoder {
 
         const messages = this.messageHistory.getMessages();
 
-        LogUtils.debug(`*** Sending ${messages.length} messages to API`, Config.colors.yellow);
-
         // Show context bar before AI response
         console.log();
         this.contextBar.printContextBar(this.stats, this.messageHistory);
@@ -473,7 +418,6 @@ export class AICoder {
         }
 
         const toolCalls = Array.from(accumulatedToolCalls.values());
-        this.debugToolCalls(toolCalls);
 
         const validToolCalls = this.validateToolCalls(toolCalls);
         if (validToolCalls.length === 0) {
@@ -499,21 +443,21 @@ export class AICoder {
     private async streamResponse(
         messages: any[]
     ): Promise<{ shouldContinue: boolean; fullResponse: string; accumulatedToolCalls: Map<number, ToolCall> }> {
-        let fullResponse = '';
+        const fullResponseWrapper = { value: '' };
         const accumulatedToolCalls: Map<number, ToolCall> = new Map();
 
         for await (const chunk of this.streamingClient.streamRequest(messages)) {
             // Check if user interrupted
             if (!this.isProcessing) {
                 console.log('\n[AI response interrupted]');
-                return { shouldContinue: false, fullResponse, accumulatedToolCalls };
+                return { shouldContinue: false, fullResponse: fullResponseWrapper.value, accumulatedToolCalls };
             }
 
             // Handle chunk
-            this.handleStreamChunk(chunk, fullResponse, accumulatedToolCalls);
+            this.handleStreamChunk(chunk, fullResponseWrapper, accumulatedToolCalls);
         }
 
-        return { shouldContinue: true, fullResponse, accumulatedToolCalls };
+        return { shouldContinue: true, fullResponse: fullResponseWrapper.value, accumulatedToolCalls };
     }
 
     /**
@@ -521,7 +465,7 @@ export class AICoder {
      */
     private handleStreamChunk(
         chunk: any, 
-        fullResponse: string, 
+        fullResponse: { value: string }, 
         accumulatedToolCalls: Map<number, ToolCall>
     ): void {
         if (chunk.usage) {
@@ -533,7 +477,7 @@ export class AICoder {
 
         // Content
         if (choice.delta?.content) {
-            fullResponse += choice.delta.content;
+            fullResponse.value += choice.delta.content;
             const coloredContent = this.streamingClient.processWithColorization(
                 choice.delta.content
             );
@@ -593,17 +537,9 @@ export class AICoder {
 
             this.streamingClient.resetColorizer();
 
-            if (Config.debug) {
-                LogUtils.debug(`*** Sending ${preparation.messages.length} messages to API`, Config.colors.yellow);
-            }
-
             const streamingResult = await this.streamResponse(preparation.messages);
             if (!streamingResult.shouldContinue) {
                 return;
-            }
-
-            if (Config.debug) {
-                LogUtils.debug(`*** Stream complete. Full response length: ${streamingResult.fullResponse?.length || 0}, Tool calls: ${streamingResult.accumulatedToolCalls.size}`);
             }
 
             const hasToolCalls = await this.validateAndProcessToolCalls(
@@ -624,114 +560,164 @@ export class AICoder {
      */
     private async executeToolCalls(toolCalls: ToolCall[]): Promise<void> {
         for (const toolCall of toolCalls) {
-            const { name } = toolCall.function;
-            const toolDef = this.toolManager.getToolDefinition(name);
+            await this.executeSingleToolCall(toolCall);
+        }
+    }
 
-            LogUtils.print(`[*] Tool: ${name}`, { color: Config.colors.yellow });
+    /**
+     * Execute a single tool call
+     */
+    private async executeSingleToolCall(toolCall: ToolCall): Promise<void> {
+        const { name } = toolCall.function;
+        const toolDef = this.toolManager.getToolDefinition(name);
 
-            // Tool not found
-            if (!toolDef) {
-                LogUtils.print(`[x] Tool not found: ${name}`, { color: Config.colors.red });
-                this.messageHistory.addSystemMessage(`Error: Tool '${name}' does not exist.`);
-                continue;
+        LogUtils.print(`[*] Tool: ${name}`, { color: Config.colors.yellow });
+
+        // Tool not found
+        if (!toolDef) {
+            this.handleToolNotFound(name, toolCall.id);
+            return;
+        }
+
+        const preview = await this.generateToolPreview(toolCall);
+        this.displayToolInfo(toolCall, toolDef, preview);
+
+        // Auto-reject if preview cannot be approved
+        if (preview && !preview.canApprove) {
+            this.addToolResult(toolCall.id, preview.content);
+            return;
+        }
+
+        const shouldInterruptAfterExecution = await this.handleToolApproval(toolCall, toolDef);
+        if (shouldInterruptAfterExecution === null) {
+            return; // User denied execution
+        }
+
+        await this.executeApprovedTool(toolCall, toolDef, shouldInterruptAfterExecution);
+    }
+
+    /**
+     * Handle tool not found case
+     */
+    private handleToolNotFound(name: string, toolCallId: string): void {
+        LogUtils.print(`[x] Tool not found: ${name}`, { color: Config.colors.red });
+        this.messageHistory.addSystemMessage(`Error: Tool '${name}' does not exist.`);
+    }
+
+    /**
+     * Generate preview for a tool call
+     */
+    private async generateToolPreview(toolCall: ToolCall): Promise<any> {
+        const toolDef = this.toolManager.getToolDefinition(toolCall.function.name);
+        if (!toolDef?.generatePreview) {
+            return null;
+        }
+
+        const args = JSON.parse(toolCall.function.arguments);
+        return await this.toolManager.generatePreview(toolCall.function.name, args);
+    }
+
+    /**
+     * Display tool information
+     */
+    private displayToolInfo(toolCall: ToolCall, toolDef: any, preview: any): void {
+        if (preview) {
+            LogUtils.print(ToolFormatter.formatPreview(preview));
+            const args = JSON.parse(toolCall.function.arguments);
+            if (args.path) {
+                LogUtils.print(`Path: ${args.path}`);
             }
+        } else {
+            const formattedArgs = this.toolManager.formatToolArguments(
+                toolCall.function.name,
+                toolCall.function.arguments
+            );
+            LogUtils.print(formattedArgs);
+        }
+    }
 
-            // Show tool info
-            let preview = null;
-            if (toolDef.generatePreview) {
-                const args = JSON.parse(toolCall.function.arguments);
-                preview = await this.toolManager.generatePreview(name, args);
-                if (preview) {
-                    LogUtils.print(ToolFormatter.formatPreview(preview));
-                }
-                if (args.path) {
-                    LogUtils.print(`Path: ${args.path}`);
-                }
-            } else {
-                const formattedArgs = this.toolManager.formatToolArguments(
-                    name,
-                    toolCall.function.arguments
-                );
-                LogUtils.print(formattedArgs);
-            }
+    /**
+     * Handle tool approval logic
+     */
+    private async handleToolApproval(toolCall: ToolCall, toolDef: any): Promise<boolean | null> {
+        // Auto-approve if in yolo mode or tool is auto-approved
+        if (Config.yoloMode || toolDef?.auto_approved) {
+            return false;
+        }
 
-            // Auto-reject if preview cannot be approved
-            if (preview && !preview.canApprove) {
-                this.messageHistory.addToolResults([
-                    {
-                        tool_call_id: toolCall.id,
-                        content: preview.content,
-                    },
-                ]);
-                continue;
-            }
+        await this.callNotifyHook('onBeforeApprovalPrompt');
 
-            // Track if we should interrupt after tool execution (for guidance)
-            let shouldInterruptAfterExecution = false;
+        const approval = await this.inputHandler.prompt(
+            `${Config.colors.yellow}Approve [Y/n]: ${Config.colors.reset}`
+        );
 
-            // Approval check
-            if (!Config.yoloMode && toolDef && !toolDef.auto_approved) {
-                await this.callNotifyHook('onBeforeApprovalPrompt');
+        const approvalAnswer = approval.trim().toLowerCase() || 'y';
 
-                const approval = await this.inputHandler.prompt(
-                    `${Config.colors.yellow}Approve [Y/n]: ${Config.colors.reset}`
-                );
+        // Handle yolo command
+        if (approvalAnswer === 'yolo') {
+            Config.setYoloMode(true);
+            LogUtils.success('[*] YOLO mode ENABLED');
+            return false;
+        }
 
-                const approvalAnswer = approval.trim().toLowerCase() || 'y';
+        // Parse approval
+        const hasGuidance = approvalAnswer.endsWith('+');
+        const baseAnswer = hasGuidance ? approvalAnswer.slice(0, -1) : approvalAnswer;
 
-                // Handle yolo command
-                if (approvalAnswer === 'yolo') {
-                    Config.setYoloMode(true);
-                    LogUtils.success('[*] YOLO mode ENABLED');
-                }
+        const canonicalAnswer =
+            baseAnswer === 'a' ? 'y' : baseAnswer === 'd' ? 'n' : baseAnswer;
 
-                // Parse approval
-                const hasGuidance = approvalAnswer.endsWith('+');
-                const baseAnswer = hasGuidance ? approvalAnswer.slice(0, -1) : approvalAnswer;
-
-                const canonicalAnswer =
-                    baseAnswer === 'a' ? 'y' : baseAnswer === 'd' ? 'n' : baseAnswer;
-
-                shouldInterruptAfterExecution = hasGuidance;
-
-                // User denied
-                if (
-                    canonicalAnswer !== 'y' &&
-                    canonicalAnswer !== 'yes' &&
-                    approvalAnswer !== 'yolo'
-                ) {
-                    LogUtils.error('[x] Tool execution cancelled.');
-                    this.messageHistory.addToolResults([
-                        {
-                            tool_call_id: toolCall.id,
-                            content: `ERROR: User denied execution of tool '${name}'. The tool was not run.`,
-                        },
-                    ]);
-
-                    if (shouldInterruptAfterExecution) {
-                        this.isProcessing = false;
-                    }
-                    continue;
-                }
-            }
-
-            const result = await this.toolManager.executeToolCall(toolCall, true); // skip preview (already shown above)
-            this.messageHistory.addToolResults([result]);
-
-            if (toolDef?.hide_results) {
-                LogUtils.success('[*] Done');
-            } else {
-                // Display based on detail mode - no parsing needed
-                if (!Config.detailMode && result.friendly) {
-                    LogUtils.print(result.friendly);
-                } else {
-                    LogUtils.print(result.content);
-                }
-            }
-
-            // Handle guidance interruption after tool execution
-            if (shouldInterruptAfterExecution) {
+        // User denied
+        if (canonicalAnswer !== 'y' && canonicalAnswer !== 'yes') {
+            LogUtils.error('[x] Tool execution cancelled.');
+            this.addToolResult(toolCall.id, `ERROR: User denied execution of tool '${toolCall.function.name}'. The tool was not run.`);
+            
+            if (hasGuidance) {
                 this.isProcessing = false;
+            }
+            return null;
+        }
+
+        return hasGuidance;
+    }
+
+    /**
+     * Execute an approved tool call
+     */
+    private async executeApprovedTool(toolCall: ToolCall, toolDef: any, shouldInterruptAfterExecution: boolean): Promise<void> {
+        const result = await this.toolManager.executeToolCall(toolCall, true); // skip preview (already shown above)
+        this.addToolResult(toolCall.id, result.content);
+
+        this.displayToolResult(result, toolDef);
+
+        // Handle guidance interruption after tool execution
+        if (shouldInterruptAfterExecution) {
+            this.isProcessing = false;
+        }
+    }
+
+    /**
+     * Add tool result to message history
+     */
+    private addToolResult(toolCallId: string, content: string): void {
+        this.messageHistory.addToolResults([{
+            tool_call_id: toolCallId,
+            content,
+        }]);
+    }
+
+    /**
+     * Display tool execution result
+     */
+    private displayToolResult(result: any, toolDef: any): void {
+        if (toolDef?.hide_results) {
+            LogUtils.success('[*] Done');
+        } else {
+            // Display based on detail mode - no parsing needed
+            if (!Config.detailMode && result.friendly) {
+                LogUtils.print(result.friendly);
+            } else {
+                LogUtils.print(result.content);
             }
         }
     }
