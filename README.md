@@ -262,7 +262,7 @@ This project is licensed under the Apache License 2.0. See [LICENSE](LICENSE) fo
 Built with:
 - [Bun.js](https://bun.sh/) - Fast JavaScript runtime
 - [TypeScript](https://www.typescriptlang.org/) - Type-safe JavaScript
-- The open-source community
+- The open-source community!
 
 ---
 
