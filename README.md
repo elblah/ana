@@ -255,13 +255,6 @@ This project is licensed under the Apache License 2.0. See [LICENSE](LICENSE) fo
 
 - **Issues**: Report bugs and request features via GitHub Issues
 - **Documentation**: Check the `docs/` directory for detailed guides
-- **Community**: Join discussions in GitHub Discussions
-
-## Acknowledgments
-
-Built with:
-- [Bun.js](https://bun.sh/) - Fast JavaScript runtime
-- [TypeScript](https://www.typescriptlang.org/) - Type-safe JavaScript
 
 ---
 
