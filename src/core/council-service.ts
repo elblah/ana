@@ -279,7 +279,18 @@ export class CouncilService {
         if (member.name.includes('_auto')) {
             prompt += `
 
-**MANDATORY VOTING**: YOU MUST end with either:
+**CONCISE ANALYSIS REQUIRED**: Structure your response as:
+
+1. **REQUESTS** - What was asked for (1 line max)
+2. **ISSUES** - Critical problems only (bullet points, max 3)
+3. **RECOMMENDATIONS** - Essential improvements only (bullet points, max 3)
+4. **VOTE** - Your final decision (MUST be on LAST LINE)
+
+KEEP IT BRIEF: Do not state the obvious. Only mention real problems or missing requirements. If everything looks correct, say "No issues found."
+
+**300 WORD LIMIT**: Maximum 300 words total. Be concise and focused on essential information only.
+
+**MANDATORY VOTING**: YOU MUST end with either (LAST LINE ONLY):
 - IMPLEMENTATION_FINISHED
 - IMPLEMENTATION_NOT_FINISHED
 
@@ -292,7 +303,7 @@ export class CouncilService {
 
 UNANIMOUS APPROVAL REQUIRED: Implementation is approved ONLY when ALL council members vote IMPLEMENTATION_FINISHED. ANY member voting IMPLEMENTATION_NOT_FINISHED prevents completion.
 
-YOU MUST END YOUR RESPONSE WITH EXACTLY ONE OF THESE LINES:
+YOU MUST END YOUR RESPONSE WITH EXACTLY ONE OF THESE LINES (LAST LINE OF YOUR ENTIRE RESPONSE - NO EXCEPTIONS):
 
 IMPLEMENTATION_FINISHED
 IMPLEMENTATION_NOT_FINISHED
