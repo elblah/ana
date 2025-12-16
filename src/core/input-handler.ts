@@ -18,6 +18,9 @@ import { ShellUtils } from '../utils/shell-utils.js';
 import { FileUtils } from '../utils/file-utils.js';
 import { pluginSystem } from './plugin-system.js';
 import type { PopupMenuItem } from './types/index.js';
+import { writeFileSync, readFileSync, unlinkSync, existsSync } from 'node:fs';
+import { exec } from 'node:child_process';
+import { randomBytes } from 'node:crypto';
 
 
 
@@ -177,6 +180,11 @@ export class InputHandler {
                     handler: () => this.handleShowStats(),
                 },
                 {
+                    label: 'Inject Memory',
+                    key: 'i',
+                    handler: async () => await this.handleInjectMemory(),
+                },
+                {
                     label: 'Save Session',
                     key: 'e',
                     handler: async () => await this.handleSaveSession(),
@@ -284,6 +292,11 @@ export class InputHandler {
 
             case 't':
                 this.handleShowStats();
+                handled = true;
+                break;
+
+            case 'i':
+                await this.handleInjectMemory();
                 handled = true;
                 break;
 
@@ -440,6 +453,73 @@ export class InputHandler {
      */
     private handleUnknownSelection(): void {
         LogUtils.print(`\n[Unknown selection]`, { color: Config.colors.dim });
+    }
+
+    /**
+     * Handle inject memory from tmux popup menu
+     */
+    private async handleInjectMemory(): Promise<void> {
+        if (!process.env.TMUX) {
+            LogUtils.error('This feature only works inside a tmux environment.');
+            LogUtils.warn('Please run this command inside tmux.');
+            return;
+        }
+
+        if (!this.messageHistory) {
+            LogUtils.error('\n[*] Inject memory: message history not available');
+            return;
+        }
+
+        const editor = process.env.EDITOR || 'nano';
+        const randomSuffix = randomBytes(4).toString('hex');
+        const tempFile = TempFileUtils.createTempFile(`aicoder-inject-${randomSuffix}`, '.md');
+
+        try {
+            writeFileSync(tempFile, '', 'utf8');
+            LogUtils.print('Opening ' + editor + ' in tmux window...', { color: Config.colors.cyan });
+            LogUtils.print('Save and exit when done. The editor is running in a separate tmux window.', { 
+                color: Config.colors.dim 
+            });
+
+            const syncPoint = `inject_done_${randomSuffix}`;
+            const windowName = `inject_${randomSuffix}`;
+
+            const tmuxCmd = `tmux new-window -n "${windowName}" 'bash -c "${editor} ${tempFile}; tmux wait-for -S ${syncPoint}"'`;
+
+            await new Promise<void>((resolve, reject) => {
+                exec(tmuxCmd, (error) => {
+                    if (error) reject(error);
+                    else resolve();
+                });
+            });
+            
+            await new Promise<void>((resolve, reject) => {
+                exec(`tmux wait-for ${syncPoint}`, (error) => {
+                    if (error) reject(error);
+                    else resolve();
+                });
+            });
+
+            const content = readFileSync(tempFile, 'utf8').trim();
+
+            if (content) {
+                // Insert content at the correct position in message history
+                this.messageHistory.insertUserMessageAfterLastAppropriatePosition(content);
+
+                LogUtils.success('Memory injected successfully.');
+                LogUtils.print('--- Injected Memory ---', { color: Config.colors.dim });
+                LogUtils.print(content);
+                LogUtils.print('-----------------------', { color: Config.colors.dim });
+            } else {
+                LogUtils.warn('Empty content - injection cancelled.');
+            }
+        } catch (error) {
+            LogUtils.error('Error with memory injection: ' + error);
+        } finally {
+            if (existsSync(tempFile)) {
+                unlinkSync(tempFile);
+            }
+        }
     }
 
     /**

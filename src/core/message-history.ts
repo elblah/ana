@@ -447,4 +447,49 @@ export class MessageHistory {
 
         return { prunedCount, savedBytes, protectedCount };
     }
+
+    /**
+     * Insert a user message at the correct position in message history
+     * Scans backwards from the end and finds the appropriate injection position:
+     * Priority: 1) tool response (role=tool), then 2) assistant message with no tool calls, then 3) user message
+     */
+    insertUserMessageAfterLastAppropriatePosition(content: string): void {
+        let lastToolIndex = -1;
+        let lastAssistantIndex = -1;
+        let lastUserIndex = -1;
+        
+        // Scan backwards from the end to find the LAST occurrence of each type
+        for (let i = this.messages.length - 1; i >= 0; i--) {
+            const msg = this.messages[i];
+            
+            if (msg.role === 'tool' && lastToolIndex === -1) {
+                lastToolIndex = i;
+            }
+            
+            if (msg.role === 'assistant' && (!msg.tool_calls || msg.tool_calls.length === 0) && lastAssistantIndex === -1) {
+                lastAssistantIndex = i;
+            }
+            
+            if (msg.role === 'user' && lastUserIndex === -1) {
+                lastUserIndex = i;
+            }
+        }
+        
+        // Priority: tool > assistant > user
+        let insertionIndex = this.messages.length; // Default: append to end
+        
+        if (lastToolIndex !== -1) {
+            insertionIndex = lastToolIndex + 1;
+        } else if (lastAssistantIndex !== -1) {
+            insertionIndex = lastAssistantIndex + 1;
+        } else if (lastUserIndex !== -1) {
+            insertionIndex = lastUserIndex + 1;
+        }
+        
+        // Create and insert the user message
+        const userMessage: Message = { role: 'user', content };
+        this.messages.splice(insertionIndex, 0, userMessage);
+        this.stats.incrementMessagesSent();
+        this.estimateContext();
+    }
 }
