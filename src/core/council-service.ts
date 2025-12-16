@@ -93,13 +93,13 @@ export class CouncilService {
     /**
      * Load council members from filesystem with optional filtering
      */
-    async loadMembers(filters?: string[], preferAutoModerator: boolean = false, autoMode: boolean = false): Promise<{ members: CouncilMember[], moderator: CouncilMember | null }> {
+    async loadMembers(filters?: string[], preferAutoModerator: boolean = false, autoMode: boolean = false, includeDisabled: boolean = false): Promise<{ members: CouncilMember[], moderator: CouncilMember | null }> {
         
         // AUTO-MODE: If we have cached directory (from previous successful load), use it
         // This prevents "council not found" when process.cwd() changes between auto-council runs
         if (CouncilService.lastSuccessfulCouncilDir) {
             const councilDir = CouncilService.lastSuccessfulCouncilDir;
-            return this.loadMembersFromDirectory(councilDir, filters, preferAutoModerator, autoMode);
+            return this.loadMembersFromDirectory(councilDir, filters, preferAutoModerator, autoMode, includeDisabled);
         }
 
         // NORMAL MODE: Find council directory and cache it for future auto-mode runs
@@ -124,103 +124,8 @@ export class CouncilService {
             return { members: [], moderator: null };
         }
 
-        const files = fs.readdirSync(councilDir).filter(f => f.endsWith('.txt'));
-        const sortedFiles = files.sort((a, b) => this.naturalSort(a, b));
-        const members: CouncilMember[] = [];
-        let moderator: CouncilMember | null = null;
-
-        for (const file of files) {
-            const name = file.replace('.txt', '');
-            
-            // Skip deactivated members (starting with _)
-            if (name.startsWith('_')) {
-                continue;
-            }
-            
-            // Skip auto members in normal mode, and regular members in auto mode
-            if (!autoMode && name.includes('_auto')) {
-                continue;
-            }
-            if (autoMode && !name.includes('_auto') && !name.includes('moderator')) {
-                continue;
-            }
-            
-            try {
-                const content = fs.readFileSync(path.join(councilDir, file), 'utf-8').trim();
-                
-                if (content.length === 0) {
-                    LogUtils.warn(`Empty council member file: ${file}`);
-                    continue;
-                }
-
-                // Moderator selection logic
-                if (name.includes('moderator')) {
-                    // For auto mode, prioritize auto moderator
-                    if (preferAutoModerator && name.includes('auto')) {
-                        moderator = { name, prompt: content };
-                        continue;
-                    }
-                    // If in auto mode and we already have auto moderator, skip regular moderator
-                    if (preferAutoModerator && moderator && moderator.name.includes('auto')) {
-                        continue;
-                    }
-                    // Otherwise, use the first moderator found
-                    if (!moderator) {
-                        moderator = { name, prompt: content };
-                    }
-                    continue;
-                }
-                
-                // Apply filters to regular members (support both name and number-based filtering)
-                if (filters && filters.length > 0) {
-                    let matches = false;
-                    
-                    for (const keyword of filters) {
-                        // Check if keyword is a number (number-based filtering)
-                        const targetNumber = parseInt(keyword);
-                        if (!isNaN(targetNumber)) {
-                            // Use EXACT same logic as display for consistency
-                            const allDisplayFiles = this.getDisplayFiles(sortedFiles);
-                            
-                            const memberIndex = allDisplayFiles.indexOf(file);
-                            if (memberIndex === targetNumber - 1) {
-                                matches = true;
-                                break;
-                            }
-                        } else {
-                            // Name-based filtering (existing behavior)
-                            if (name.includes(keyword)) {
-                                matches = true;
-                                break;
-                            }
-                        }
-                    }
-                    
-                    if (!matches) continue;
-                }
-
-                members.push({ name, prompt: content });
-            } catch (error) {
-                LogUtils.warn(`Failed to load council member ${file}: ${error}`);
-            }
-        }
-
-        // Cache successful council directory for auto-mode consistency
-        if (members.length > 0 || moderator) {
-            CouncilService.lastSuccessfulCouncilDir = councilDir;
-        }
-
-        // Show which council source is being used
-        const isProjectSpecific = councilDir === path.join(process.cwd(), '.aicoder/council');
-        const sourceType = isProjectSpecific ? 'Project' : 'Global';
-        LogUtils.print(`Using ${sourceType} council: ${councilDir}`, {
-            color: Config.colors.cyan
-        });
-        LogUtils.print(`✓ Found ${members.length} council members${moderator ? ' + 1 moderator' : ''}`, {
-            color: Config.colors.green
-        });
-
-        return { members, moderator };
+        // Use the shared logic
+        return this.loadMembersFromDirectory(councilDir, filters, preferAutoModerator, autoMode, includeDisabled);
     }
 
     /**
@@ -230,7 +135,8 @@ export class CouncilService {
         councilDir: string,
         filters?: string[],
         preferAutoModerator: boolean = false,
-        autoMode: boolean = false
+        autoMode: boolean = false,
+        includeDisabled: boolean = false
     ): Promise<{ members: CouncilMember[], moderator: CouncilMember | null }> {
         if (!fs.existsSync(councilDir)) {
             return { members: [], moderator: null };
@@ -244,8 +150,24 @@ export class CouncilService {
         for (const file of sortedFiles) {
             const name = file.replace('.txt', '');
             
-            // Apply auto mode filtering - for display consistency, don't skip files here
-            // Auto mode will only use auto members, but for indexing we include all display files
+            // Skip deactivated members (starting with _) unless includeDisabled is true
+            if (!includeDisabled && name.startsWith('_')) {
+                continue;
+            }
+            
+            // Skip deactivated members (starting with _) unless includeDisabled is true
+            if (!includeDisabled && name.startsWith('_')) {
+                continue;
+            }
+            
+            // Apply auto/normal mode filtering (but not for disabled members when includeDisabled=true)
+            if (autoMode && !name.includes('_auto') && !name.includes('moderator')) {
+                // In auto mode: skip non-auto members (but allow moderators for now)
+                continue;
+            } else if (!autoMode && name.includes('_auto') && (!includeDisabled || !name.startsWith('_'))) {
+                // In normal mode: skip auto members unless they're disabled and includeDisabled=true
+                continue;
+            }
             
             try {
                 const content = fs.readFileSync(path.join(councilDir, file), 'utf-8').trim();
@@ -257,27 +179,22 @@ export class CouncilService {
                 // Moderator selection logic
                 if (name.includes('moderator')) {
                     // For auto mode, prioritize auto moderator
-                    if (preferAutoModerator && name.includes('auto')) {
+                    if (autoMode && name.includes('auto')) {
                         moderator = { name, prompt: content };
                         continue;
                     }
                     // If in auto mode and we already have auto moderator, skip regular moderator
-                    if (preferAutoModerator && moderator && moderator.name.includes('auto')) {
+                    if (autoMode && moderator && moderator.name.includes('auto')) {
+                        continue;
+                    }
+                    // In normal mode, skip auto moderator if regular moderator available
+                    if (!autoMode && name.includes('auto')) {
                         continue;
                     }
                     // Otherwise, use the first moderator found
                     if (!moderator) {
                         moderator = { name, prompt: content };
                     }
-                    continue;
-                }
-                
-                // Apply auto/normal mode filtering first
-                if (autoMode && !name.includes('_auto')) {
-                    // In auto mode: skip non-auto members
-                    continue;
-                } else if (!autoMode && name.includes('_auto')) {
-                    // In normal mode: skip auto members
                     continue;
                 }
                 

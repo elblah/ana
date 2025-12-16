@@ -19,6 +19,9 @@ describe('Council Fix Verification', () => {
         originalCwd = process.cwd();
         process.chdir('/home/blah/poc/aicoder/tsv');
         
+        // Clear any cached council directory to ensure test isolation
+        CouncilService.setLastSuccessfulCouncilDir(null);
+        
         const stats = new Stats();
         const streamingClient = new StreamingClient(stats, new ToolManager(stats));
         const processor = new AIProcessor(streamingClient);
@@ -39,7 +42,7 @@ describe('Council Fix Verification', () => {
     });
 
     it('verifies auto mode still works: auto council includes only auto members', async () => {
-        const { members } = await councilService.loadMembers(['auto'], true, true);
+        const { members } = await councilService.loadMembers(['auto'], false, true);
         
         const autoMembers = members.filter(m => m.name.includes('_auto'));
         const regularMembers = members.filter(m => !m.name.includes('_auto'));

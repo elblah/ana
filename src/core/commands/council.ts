@@ -442,7 +442,7 @@ The above specification defines the requirements. Ensure your revised implementa
         try {
             const { dir: councilDir, isProjectSpecific } = this.getCouncilDirectory();
             const sourceType = isProjectSpecific ? 'Project' : 'Global';
-            const memberFiles = this.getSortedMemberFiles();
+            const memberFiles = this.getSortedMemberFiles(true); // Show disabled members
             
             // Check for moderator
             const files = fs.readdirSync(councilDir);
@@ -465,8 +465,10 @@ The above specification defines the requirements. Ensure your revised implementa
                 let index = 1;
                 for (const member of memberFiles) {
                     const filePath = path.join(councilDir, member.file);
+                    const memberColor = member.disabled ? colors.dim : colors.white;
+                    const status = member.disabled ? ' (disabled)' : '';
                     
-                    LogUtils.print(`  ${index}) ${member.name}`, { color: colors.white });
+                    LogUtils.print(`  ${index}) ${member.name}${status}`, { color: memberColor });
                     index++;
                 }
             }
@@ -681,10 +683,17 @@ The above specification defines the requirements. Ensure your revised implementa
     /**
      * Get sorted council members with their file information
      */
-    private getSortedMemberFiles(): Array<{ name: string; file: string; disabled: boolean }> {
+    private getSortedMemberFiles(includeDisabled: boolean = false): Array<{ name: string; file: string; disabled: boolean }> {
         const { dir: councilDir } = this.getCouncilDirectory();
         
-        const files = this.getDisplayFiles(councilDir);
+        let files = this.getDisplayFiles(councilDir);
+        
+        if (includeDisabled) {
+            // Include disabled files (starting with _)
+            files = fs.readdirSync(councilDir)
+                .filter(file => file.endsWith('.txt') && file !== 'moderator.txt')
+                .sort((a, b) => this.naturalSort(a, b));
+        }
             
         return files.map(file => {
             const name = file.replace('.txt', '');
