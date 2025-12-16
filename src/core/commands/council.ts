@@ -11,6 +11,7 @@ import { ToolManager } from '../tool-manager.js';
 import { Config } from '../config.js';
 import { LogUtils } from '../../utils/log-utils.js';
 import { PromptBuilder } from '../../prompts/prompt-builder.js';
+import { TempFileUtils } from '../../utils/temp-file-utils.js';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
@@ -59,6 +60,12 @@ export class CouncilCommand extends BaseCommand {
             let autoContinue = false;
             let directOpinions = false;
             let resetContext = Config.autoCouncilResetContext; // Default to config
+            
+            // Skip command name if present
+            if (args.length > 0 && (args[0] === '/council' || args[0] === 'council')) {
+                i = 1;
+            }
+            
             while (i < args.length) {
                 const arg = args[i];
                 
@@ -149,12 +156,12 @@ export class CouncilCommand extends BaseCommand {
                 // Use whatever directory was cached from the first run
                 // Don't override - trust the cache from the initial discovery
             }
-            // Handle auto-mode special case - file path OR text content
+            // Handle auto-mode special case - editor mode OR file path OR text content
             else if (autoMode) {
                 // Extract spec argument from remaining arguments
                 if (i >= args.length) {
-                    LogUtils.error('Auto-mode requires specification: /council --auto <file_or_message>');
-                    return { shouldQuit: false, runApiCall: false };
+                    // No spec provided - open editor to create one
+                    return await this.handleAutoEdit();
                 }
                 
                 // Get the full remaining content as one argument (supports spaces)
@@ -543,6 +550,7 @@ The above specification defines the requirements. Ensure your revised implementa
         LogUtils.print('  /council <message>                               Get opinions from all council members (moderated)', { color: colors.white });
         LogUtils.print('  /council --direct <message>                      Get direct expert opinions (no moderator)', { color: colors.cyan });
         LogUtils.print('  /council --members member1,member2 <message>    Get opinions from specific members', { color: colors.white });
+        LogUtils.print('  /council --auto                                    Create specification in $EDITOR (tmux)', { color: colors.green });
         LogUtils.print('  /council --auto <spec.md>                      Auto-iterate using specification file', { color: colors.green });
         LogUtils.print('  /council --auto "any text message"             Auto-iterate using text as specification', { color: colors.green });
         LogUtils.print('  /council --auto --reset-context <spec.md>       Auto-iterate with fresh context each turn', { color: colors.green });
@@ -929,5 +937,109 @@ The above specification defines the requirements. Ensure your revised implementa
         }
         
         return '';
+    }
+
+    /**
+     * Handle auto-mode with editor - create specification using $EDITOR
+     */
+    private async handleAutoEdit(): Promise<{ shouldQuit: boolean; runApiCall: boolean }> {
+        // Check if running in tmux environment (required for editor)
+        if (!process.env.TMUX) {
+            LogUtils.error('Editor mode requires tmux environment');
+            LogUtils.print('Please run this command inside tmux, or provide a spec file:', { color: Config.colors.cyan });
+            LogUtils.print('  /council --auto your-spec.md', { color: Config.colors.white });
+            LogUtils.print('  /council --auto "your specification text"', { color: Config.colors.white });
+            return { shouldQuit: false, runApiCall: false };
+        }
+
+        const editor = process.env.EDITOR || 'nano';
+        const randomSuffix = randomBytes(4).toString('hex');
+        const tempFile = TempFileUtils.createTempFile(`council-spec-${randomSuffix}`, '.md');
+
+        try {
+            // Create empty spec file with helpful template
+            const specTemplate = `# Council Auto-Mode Specification
+
+## What needs to be implemented?
+<!-- Describe the feature, functionality, or requirement -->
+
+## Key Requirements
+<!-- List the must-have requirements -->
+
+## Acceptance Criteria
+<!-- Define what "done" looks like -->
+
+## Constraints & Notes
+<!-- Any technical constraints, preferences, or additional context -->
+`;
+            
+            fs.writeFileSync(tempFile, specTemplate, 'utf8');
+            
+            LogUtils.print('📝 Creating specification in editor...', { color: Config.colors.cyan });
+            LogUtils.print(`Opening ${editor} in tmux window...`, { color: Config.colors.dim });
+            LogUtils.print('Save and exit when done. The editor is running in a separate tmux window.', { color: Config.colors.dim });
+
+            const syncPoint = `council_spec_done_${randomSuffix}`;
+            const windowName = `council_spec_${randomSuffix}`;
+
+            const tmuxCmd = `tmux new-window -n "${windowName}" 'bash -c "${editor} ${tempFile}; tmux wait-for -S ${syncPoint}"'`;
+
+            await new Promise<void>((resolve, reject) => {
+                exec(tmuxCmd, (error) => {
+                    if (error) reject(error);
+                    else resolve();
+                });
+            });
+
+            await new Promise<void>((resolve, reject) => {
+                exec(`tmux wait-for ${syncPoint}`, (error) => {
+                    if (error) reject(error);
+                    else resolve();
+                });
+            });
+
+            const content = fs.readFileSync(tempFile, 'utf8').trim();
+
+            // Check if user actually modified the template or provided content
+            if (content && content !== specTemplate.trim()) {
+                // Save spec to working location
+                const workingSpecDir = path.join(process.cwd(), '.aicoder');
+                const workingSpecPath = path.join(workingSpecDir, 'current-spec.md');
+                
+                // Ensure .aicoder directory exists
+                if (!fs.existsSync(workingSpecDir)) {
+                    fs.mkdirSync(workingSpecDir, { recursive: true });
+                }
+                
+                // Write spec to working location
+                fs.writeFileSync(workingSpecPath, content, 'utf-8');
+                
+                // Load spec into memory for auto-mode
+                CouncilCommand.loadSpec(content, workingSpecPath);
+                
+                LogUtils.print('✅ Specification saved and loaded', { color: Config.colors.green });
+                LogUtils.print(`📁 Spec saved to: ${workingSpecPath}`, { color: Config.colors.cyan });
+                
+                // Trigger auto-mode with the newly created spec
+                this.context.aiCoder?.setNextPrompt(`/council --auto ${workingSpecPath}`);
+                return { shouldQuit: false, runApiCall: true };
+            }
+
+            LogUtils.print('❌ Empty specification - cancelled', { color: Config.colors.yellow });
+            LogUtils.print('To try again:', { color: Config.colors.cyan });
+            LogUtils.print('  /council --auto', { color: Config.colors.white });
+            LogUtils.print('Or provide a spec directly:', { color: Config.colors.cyan });
+            LogUtils.print('  /council --auto your-spec.md', { color: Config.colors.white });
+
+        } catch (error) {
+            LogUtils.error(`Error with editor: ${error}`);
+        } finally {
+            // Clean up temp file
+            if (fs.existsSync(tempFile)) {
+                fs.unlinkSync(tempFile);
+            }
+        }
+
+        return { shouldQuit: false, runApiCall: false };
     }
 }
