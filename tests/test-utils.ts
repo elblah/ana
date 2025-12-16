@@ -5,6 +5,7 @@
  * and providing proper cleanup mechanisms
  */
 
+import * as path from 'node:path';
 import { FileUtils } from '../src/utils/file-utils.js';
 import { ShellUtils } from '../src/utils/shell-utils.js';
 
@@ -13,14 +14,14 @@ export class TestEnvironment {
     
     /**
      * Get a unique temporary directory for each test
-     * Uses system temp directory to avoid project pollution
+     * Uses project root tmp directory to organize test files properly
      */
     static getTempDir(): string {
         const testId = ++TestEnvironment.testCounter;
-        // Use project temp directory to work within sandbox constraints
+        // Use dedicated tmp directory in project root for organization
         // Tools are sandboxed to current directory, so temp dirs must be inside project
         const basePath = process.cwd();
-        return `${basePath}/test-temp-${testId}-${Date.now()}`;
+        return `${basePath}/tmp/test-temp-${testId}-${Date.now()}`;
     }
     
     /**
@@ -35,6 +36,11 @@ export class TestEnvironment {
         // Create unique temp directory
         const tempDir = this.getTempDir();
         try {
+            // Ensure the base tmp directory exists first
+            const baseTmpDir = path.resolve(process.cwd(), 'tmp');
+            await ShellUtils.executeCommand(`mkdir -p ${baseTmpDir}`);
+            
+            // Create test-specific subdirectory
             await ShellUtils.executeCommand(`mkdir -p ${tempDir}`);
         } catch (error) {
             throw new Error(`Failed to create temp directory ${tempDir}: ${error}`);
@@ -49,6 +55,14 @@ export class TestEnvironment {
     static async cleanup(tempDir: string): Promise<void> {
         try {
             await ShellUtils.executeCommand(`rm -rf ${tempDir}`);
+        } catch {
+            // Ignore cleanup errors
+        }
+        
+        // Also try to cleanup the base tmp directory if it's empty
+        try {
+            const baseTmpDir = path.resolve(process.cwd(), 'tmp');
+            await ShellUtils.executeCommand(`rmdir ${baseTmpDir} 2>/dev/null || true`);
         } catch {
             // Ignore cleanup errors
         }

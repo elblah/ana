@@ -149,42 +149,69 @@ export class CouncilCommand extends BaseCommand {
                 // Use whatever directory was cached from the first run
                 // Don't override - trust the cache from the initial discovery
             }
-            // Handle auto-mode special case - requires file path
+            // Handle auto-mode special case - file path OR text content
             else if (autoMode) {
-                // Extract spec file from remaining arguments
+                // Extract spec argument from remaining arguments
                 if (i >= args.length) {
-                    LogUtils.error('Auto-mode requires specification file: /council --auto <file>');
+                    LogUtils.error('Auto-mode requires specification: /council --auto <file_or_message>');
                     return { shouldQuit: false, runApiCall: false };
                 }
                 
-                const specFile = args[i];
-                const fullSpecPath = path.resolve(process.cwd(), specFile);
+                // Get the full remaining content as one argument (supports spaces)
+                const specArgument = args.slice(i).join(' ');
                 
-                if (!fs.existsSync(fullSpecPath)) {
-                    LogUtils.error(`File "${specFile}" not found`);
-                    return { shouldQuit: false, runApiCall: false };
+                // Check if argument contains spaces - if yes, treat as text content
+                // If no spaces, treat as file path (existing behavior)
+                if (specArgument.includes(' ')) {
+                    // Text content mode - save to .aicoder/current-spec.md
+                    const workingSpecDir = path.join(process.cwd(), '.aicoder');
+                    const workingSpecPath = path.join(workingSpecDir, 'current-spec.md');
+                    
+                    // Ensure .aicoder directory exists
+                    if (!fs.existsSync(workingSpecDir)) {
+                        fs.mkdirSync(workingSpecDir, { recursive: true });
+                    }
+                    
+                    // Write text content to spec file
+                    fs.writeFileSync(workingSpecPath, specArgument, 'utf-8');
+                    
+                    // Load spec into memory
+                    CouncilCommand.loadSpec(specArgument, workingSpecPath);
+                    message = 'implement the specification';
+                    
+                    LogUtils.print('📋 Loaded specification from text', { color: colors.green });
+                    LogUtils.print(`📝 Spec saved to: ${workingSpecPath}`, { color: colors.cyan });
+                } else {
+                    // File path mode - existing behavior
+                    const specFile = specArgument;
+                    const fullSpecPath = path.resolve(process.cwd(), specFile);
+                    
+                    if (!fs.existsSync(fullSpecPath)) {
+                        LogUtils.error(`File "${specFile}" not found`);
+                        return { shouldQuit: false, runApiCall: false };
+                    }
+                    
+                    // Copy spec to working location and load into memory
+                    const workingSpecDir = path.join(process.cwd(), '.aicoder');
+                    const workingSpecPath = path.join(workingSpecDir, 'current-spec.md');
+                    
+                    // Ensure .aicoder directory exists
+                    if (!fs.existsSync(workingSpecDir)) {
+                        fs.mkdirSync(workingSpecDir, { recursive: true });
+                    }
+                    
+                    // Copy spec to working location (only if different paths)
+                    if (fullSpecPath !== workingSpecPath) {
+                        fs.copyFileSync(fullSpecPath, workingSpecPath);
+                    }
+                    
+                    // Load working spec into memory (not original)
+                    CouncilCommand.loadSpec(fs.readFileSync(workingSpecPath, 'utf-8'), workingSpecPath);
+                    message = 'implement the specification';
+                    
+                    LogUtils.print(`📋 Loaded specification: ${specFile}`, { color: colors.green });
+                    LogUtils.print(`📝 Working spec copied to: ${workingSpecPath}`, { color: colors.cyan });
                 }
-                
-                // Copy spec to working location and load into memory
-                const workingSpecDir = path.join(process.cwd(), '.aicoder');
-                const workingSpecPath = path.join(workingSpecDir, 'current-spec.md');
-                
-                // Ensure .aicoder directory exists
-                if (!fs.existsSync(workingSpecDir)) {
-                    fs.mkdirSync(workingSpecDir, { recursive: true });
-                }
-                
-                // Copy spec to working location (only if different paths)
-                if (fullSpecPath !== workingSpecPath) {
-                    fs.copyFileSync(fullSpecPath, workingSpecPath);
-                }
-                
-                // Load working spec into memory (not original)
-                CouncilCommand.loadSpec(fs.readFileSync(workingSpecPath, 'utf-8'), workingSpecPath);
-                message = 'implement the specification';
-                
-                LogUtils.print(`📋 Loaded specification: ${specFile}`, { color: colors.green });
-                LogUtils.print(`📝 Working spec copied to: ${workingSpecPath}`, { color: colors.cyan });
             } else {
                 // Extract message from remaining arguments
                 if (i < args.length) {
@@ -517,6 +544,7 @@ The above specification defines the requirements. Ensure your revised implementa
         LogUtils.print('  /council --direct <message>                      Get direct expert opinions (no moderator)', { color: colors.cyan });
         LogUtils.print('  /council --members member1,member2 <message>    Get opinions from specific members', { color: colors.white });
         LogUtils.print('  /council --auto <spec.md>                      Auto-iterate using specification file', { color: colors.green });
+        LogUtils.print('  /council --auto "any text message"             Auto-iterate using text as specification', { color: colors.green });
         LogUtils.print('  /council --auto --reset-context <spec.md>       Auto-iterate with fresh context each turn', { color: colors.green });
         LogUtils.print('  /council --auto --no-reset <spec.md>           Auto-iterate while preserving context', { color: colors.green });
         LogUtils.print('  /council current                                 Show current council plan', { color: colors.white });
@@ -626,6 +654,15 @@ The above specification defines the requirements. Ensure your revised implementa
      */
     static getCurrentSpecFile(): string | null {
         return this.currentSpecFile;
+    }
+
+    /**
+     * Reset static state - for testing only
+     */
+    static resetState(): void {
+        this.currentSpec = null;
+        this.currentSpecFile = null;
+        this.lastSuccessfulCouncilDir = null;
     }
 
     /**
