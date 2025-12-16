@@ -164,6 +164,8 @@ export class AICoder {
                 { color: Config.colors.cyan }
             );
             this.isProcessing = false;
+            // Clear any pending next prompt when interrupted
+            this.nextPrompt = null;
             return;
         }
         
