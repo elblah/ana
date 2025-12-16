@@ -14,6 +14,7 @@ export interface AIProcessorConfig {
     systemPrompt?: string;
     maxRetries?: number;
     timeout?: number;
+    excludeTools?: boolean;
 }
 
 /**
@@ -61,7 +62,8 @@ export class AIProcessor {
             const response = this.streamingClient.streamRequest(
                 allMessages,
                 false, // Non-streaming for complete response
-                true  // Throw on error
+                true,  // Throw on error
+                finalConfig.excludeTools  // Exclude tools if specified
             );
 
             for await (const chunk of response) {

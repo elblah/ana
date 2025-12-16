@@ -69,6 +69,18 @@ export const TOOL_DEFINITION = {
         try {
             // Check if file exists
             const exists = FileUtils.fileExistsWithSandbox(path);
+
+            // CRITICAL SAFETY CHECK: Block if file exists but wasn't read first
+            if (exists && !FileUtils.wasFileRead(path)) {
+                return {
+                    tool: 'write_file',
+                    summary: `Write to file: ${path}`,
+                    content: `Error: File "${path}" exists but wasn't read first. Use read_file('${path}') before writing to prevent accidental data loss.`,
+                    warning: 'File must be read first',
+                    canApprove: false,
+                };
+            }
+
             let diffContent = '';
 
             // Create temporary files for diff
@@ -97,10 +109,6 @@ export const TOOL_DEFINITION = {
                 tool: 'write_file',
                 summary: exists ? `Modify existing file: ${path}` : `Create new file: ${path}`,
                 content: diffContent,
-                warning:
-                    exists && !FileUtils.wasFileRead(path)
-                        ? 'File exists but was not read first - potential overwrite'
-                        : undefined,
                 canApprove: diffResult.hasChanges, // Only approve if there are actual differences
                 isDiff: true,
             };
@@ -125,6 +133,25 @@ export async function executeWriteFile(args: ToolExecutionArgs): Promise<ToolOut
     try {
         const { path, content } = params;
 
+        // SAFETY: Check if file exists and wasn't read first
+        if (FileUtils.fileExistsWithSandbox(path) && !FileUtils.wasFileRead(path)) {
+            const errorOutput: ToolOutput = {
+                tool: 'write_file',
+                friendly: `✗ Cannot overwrite existing file '${path}' without reading it first`,
+                important: {
+                    path: path,
+                },
+                detailed: {
+                    content_length: content.length,
+                },
+                results: {
+                    error: `File exists but was not read first. Use read_file('${path}') before writing.`,
+                    showWhenDetailOff: true,
+                },
+            };
+            return errorOutput;
+        }
+
         // Use FileUtils for sandboxed file writing
         let result: string;
         try {
@@ -133,7 +160,7 @@ export async function executeWriteFile(args: ToolExecutionArgs): Promise<ToolOut
             // Create error output
             const errorOutput: ToolOutput = {
                 tool: 'write_file',
-                friendly: `ERROR: Failed to write '${path}': ${error instanceof Error ? error.message : String(error)}`,
+                friendly: `✗ Failed to write '${path}': ${error instanceof Error ? error.message : String(error)}`,
                 important: {
                     path: path,
                 },
@@ -176,7 +203,7 @@ export async function executeWriteFile(args: ToolExecutionArgs): Promise<ToolOut
     } catch (error) {
         const errorOutput: ToolOutput = {
             tool: 'write_file',
-            friendly: `ERROR: Failed to write file: ${error instanceof Error ? error.message : String(error)}`,
+            friendly: `✗ Failed to write file: ${error instanceof Error ? error.message : String(error)}`,
             important: {
                 path: params.path,
             },

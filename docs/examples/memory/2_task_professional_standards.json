@@ -1,0 +1,10 @@
+[
+  {
+    "role": "user",
+    "content": "You must maintain professional standards throughout this task. No shortcuts, no lazy implementations, no premature success declarations."
+  },
+  {
+    "role": "assistant",
+    "content": "I commit to professional standards. Every implementation will be thoughtful, every decision justified, and success declared only after comprehensive testing and verification."
+  }
+]

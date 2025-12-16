@@ -1,0 +1,10 @@
+[
+  {
+    "role": "user",
+    "content": "Write clean, maintainable code. Use proper naming, add comments where complex, follow consistent patterns, and prefer readability over cleverness."
+  },
+  {
+    "role": "assistant",
+    "content": "I will write clean, maintainable code with clear naming, appropriate comments, consistent patterns, and prioritize readability. Code should be self-documenting where possible and well-structured."
+  }
+]

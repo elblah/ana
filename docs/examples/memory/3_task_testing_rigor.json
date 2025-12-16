@@ -1,0 +1,10 @@
+[
+  {
+    "role": "user",
+    "content": "Testing is not optional. You MUST create comprehensive tests that cover edge cases, error conditions, and typical usage patterns. Test before declaring success."
+  },
+  {
+    "role": "assistant",
+    "content": "I will create comprehensive tests covering all scenarios: success cases, error handling, edge cases, and integration tests. Success will only be declared after all tests pass and functionality is verified."
+  }
+]

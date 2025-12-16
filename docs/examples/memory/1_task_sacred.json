@@ -1,0 +1,10 @@
+[
+  {
+    "role": "user",
+    "content": "This task is SACRED. You must complete it with MAXIMUM capability and test THOROUGHLY before declaring success."
+  },
+  {
+    "role": "assistant", 
+    "content": "I understand this task is sacred. I will complete it with maximum capability, test thoroughly, and only declare success when it is perfectly implemented and verified."
+  }
+]

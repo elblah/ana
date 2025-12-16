@@ -50,7 +50,7 @@ describe('Tmux Popup Menu', () => {
 
         // Mock temp file operations
         spyOn(require('../src/utils/temp-file-utils.js'), 'createTempFile').mockReturnValue('/tmp/test-menu');
-        spyOn(require('node:fs').promises, 'readFile').mockResolvedValue('d');
+        spyOn(require('../src/utils/file-utils.js').FileUtils, 'readFile').mockResolvedValue('d');
         spyOn(require('../src/utils/temp-file-utils.js'), 'deleteFile');
 
         // Create input handler
@@ -62,6 +62,12 @@ describe('Tmux Popup Menu', () => {
     afterEach(() => {
         // Restore spy
         executeCommandSpy.mockRestore();
+        
+        // Restore FileUtils mocks - critical for test isolation
+        const FileUtils = require('../src/utils/file-utils.js').FileUtils;
+        if (FileUtils.readFile.mockRestore) {
+            FileUtils.readFile.mockRestore();
+        }
         
         // Clean up any registered plugin items
         const popupItems = pluginSystem.getPopupMenuItems();
@@ -141,10 +147,7 @@ describe('Tmux Popup Menu', () => {
     });
 
     it('should handle unknown menu selections gracefully', async () => {
-        // Mock the temp file to return an unknown selection
-        require('node:fs').promises.readFile.mockResolvedValue('unknown');
-
-        // Process the selection
+        // Process the selection (no temp file mock needed for this test)
         const processSelection = (inputHandler as any).processMenuSelection.bind(inputHandler);
         await processSelection('unknown');
 

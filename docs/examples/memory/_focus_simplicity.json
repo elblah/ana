@@ -1,0 +1,10 @@
+[
+  {
+    "role": "user",
+    "content": "FOCUS: Simplicity. KISS principle. Avoid over-engineering. Choose the simplest solution that works reliably."
+  },
+  {
+    "role": "assistant",
+    "content": "FOCUS SIMPLICITY: I will apply KISS principle, avoid over-engineering, and choose the simplest working solution. Complexity is the enemy of reliability."
+  }
+]

@@ -64,7 +64,7 @@ export class ToolFormatter {
     static formatPreview(preview: ToolPreview): string {
         const lines: string[] = [];
 
-        lines.push(`${Config.colors.cyan}[PREVIEW] ${preview.summary}${Config.colors.reset}`);
+        lines.push(`${Config.colors.cyan}${preview.summary}${Config.colors.reset}`);
 
         if (preview.warning) {
             lines.push(

@@ -1,26 +1,19 @@
-.aicoder/
-.notify-prompt
-
 # Dependencies
 node_modules/
+bun.lockb
 
-# Build artifacts
+# Build outputs
 dist/
 build/
+*.js
+*.js.map
 
-# Development and temporary files
-*.bak
-*.tmp
-session.json
-tmp/
-temp/
-
-# Environment files
-.env
-.env.local
-.env.development.local
-.env.test.local
-.env.production.local
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
 
 # OS generated files
 .DS_Store
@@ -31,66 +24,40 @@ temp/
 ehthumbs.db
 Thumbs.db
 
-# IDE files
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-
-# Logs
-logs/
+# Runtime and temporary files
 *.log
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
+*.tmp
+*.temp
+.cache/
+tmp/
+.env
+.env.local
+.env.*.local
 
-# Runtime data
-pids/
-*.pid
-*.seed
-*.pid.lock
+# AI Assistant files (user-specific)
+.aicoder/
+.notify-prompt
+.test-spec.md
 
-# Coverage directory used by tools like istanbul
+# Testing coverage
 coverage/
 *.lcov
 
-# nyc test coverage
-.nyc_output
+# Debug files
+diff.log
 
-# Dependency directories
-jspm_packages/
+# Backup files
+*.backup
+*.bak
 
-# Optional npm cache directory
-.npm
+# Package manager lockfiles (keep bun.lock)
+# bun.lock
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
 
-# Optional REPL history
-.node_repl_history
+# TypeScript
+*.tsbuildinfo
 
-# Output of 'npm pack'
-*.tgz
-
-# Yarn Integrity file
-.yarn-integrity
-
-# parcel-bundler cache (https://parceljs.org/)
-.cache
-.parcel-cache
-
-# next.js build output
-.next
-
-# nuxt.js build output
-.nuxt
-
-# vuepress build output
-.vuepress/dist
-
-# Serverless directories
-.serverless
-
-# FuseBox cache
-.fusebox/
-
-# DynamoDB Local files
-.dynamodb/
+# Session files
+session*.json

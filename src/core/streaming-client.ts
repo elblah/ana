@@ -37,25 +37,47 @@ export class StreamingClient {
     }
 
     /**
+     * Calculate exponential backoff delay
+     */
+    private calculateRetryDelay(attemptNum: number): number {
+        const delay = Math.min(Math.pow(2, attemptNum), Config.effectiveRetryMaxWait);
+        return delay * 1000; // Convert to milliseconds
+    }
+
+    /**
+     * Wait before retry attempt
+     */
+    private async waitForRetry(attemptNum: number): Promise<void> {
+        const delay = this.calculateRetryDelay(attemptNum);
+        await new Promise(resolve => setTimeout(resolve, delay));
+    }
+
+    /**
      * Make API request (streaming or non-streaming)
      */
     async *streamRequest(
         messages: Message[],
         stream = true,
-        throwOnError = false
+        throwOnError = false,
+        excludeTools = false
     ): AsyncGenerator<StreamChunk, void, unknown> {
         const startTime = Date.now();
         this.stats.incrementApiRequests();
 
-        // Just use the configured provider, retry up to 3 times
-        const maxRetries = 3;
+        // Use configured retry count with exponential backoff
+        let maxRetries = Config.effectiveMaxRetries;
+
+        // Check if auto retry is enabled
+        if (!Config.effectiveAutoRetry) {
+            maxRetries = 1; // Only attempt once if auto retry is disabled
+        }
 
         for (let attemptNum = 1; attemptNum <= maxRetries; attemptNum++) {
             const config = { baseUrl: Config.baseUrl, model: Config.model };
 
             try {
                 this.logRetryAttempt(config, attemptNum);
-                const requestData = this.prepareRequestData(messages, config.model, stream);
+                const requestData = this.prepareRequestData(messages, config.model, stream, excludeTools);
                 const endpoint = `${config.baseUrl}/chat/completions`;
 
                 this.logRequestDetails(endpoint, config, requestData, attemptNum);
@@ -83,6 +105,11 @@ export class StreamingClient {
             } catch (error) {
                 if (!this.handleAttemptError(error, attemptNum, maxRetries, throwOnError, startTime)) {
                     return;
+                }
+                
+                // Wait before next retry (except for last attempt)
+                if (attemptNum < maxRetries) {
+                    await this.waitForRetry(attemptNum);
                 }
             }
         }
@@ -320,20 +347,37 @@ export class StreamingClient {
     /**
      * Prepare request data for API with internal tools only
      */
-    private prepareRequestData(messages: Message[], model?: string, stream = true): ApiRequestData {
+    private prepareRequestData(messages: Message[], model?: string, stream = true, excludeTools = false): ApiRequestData {
         const data: ApiRequestData = {
             model: model || Config.model,
-            messages: messages.map((msg) => ({
-                role: msg.role,
-                content: msg.content,
-                ...(msg.tool_calls && { tool_calls: msg.tool_calls }),
-                ...(msg.tool_call_id && { tool_call_id: msg.tool_call_id }),
-            })),
+            messages: messages.map((msg) => {
+                const messageObj: any = {
+                    role: msg.role,
+                    content: msg.content,
+                };
+                
+                // Only include tool_calls if it's a non-empty array
+                if (msg.tool_calls && Array.isArray(msg.tool_calls) && msg.tool_calls.length > 0) {
+                    messageObj.tool_calls = msg.tool_calls;
+                }
+                
+                // Only include tool_call_id if it exists
+                if (msg.tool_call_id) {
+                    messageObj.tool_call_id = msg.tool_call_id;
+                }
+                
+                return messageObj;
+            }),
             stream,
         };
 
         this.addOptionalParameters(data);
-        this.addToolDefinitions(data);
+        
+        // Only add tools if not explicitly excluded
+        if (!excludeTools) {
+            this.addToolDefinitions(data);
+        }
+        
         this.validateRequestSize(data);
 
         return data;

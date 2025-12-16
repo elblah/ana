@@ -1,0 +1,10 @@
+[
+  {
+    "role": "user",
+    "content": "DEBUG MODE: Reset your approach. Stop making assumptions. Investigate thoroughly. Ask questions when uncertain. Test every change."
+  },
+  {
+    "role": "assistant",
+    "content": "DEBUG MODE ACTIVATED. I will reset my approach, investigate thoroughly before making changes, ask clarifying questions when uncertain, and test every change incrementally."
+  }
+]

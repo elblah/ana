@@ -103,7 +103,7 @@ export async function executeGrep(args: ToolExecutionArgs): Promise<ToolOutput> 
         if (!FileUtils.checkSandbox(searchPath, 'grep')) {
             const errorOutput: ToolOutput = {
                 tool: 'grep',
-                friendly: `ERROR: Failed to search: path "${path}" outside current directory not allowed`,
+                friendly: `✗ Failed to search: path "${path}" outside current directory not allowed`,
                 important: {
                     text: text,
                 },
@@ -195,7 +195,7 @@ export async function executeGrep(args: ToolExecutionArgs): Promise<ToolOutput> 
                 } else {
                     const errorOutput: ToolOutput = {
                         tool: 'grep',
-                        friendly: `ERROR: Failed to search: ${stderr || `exit code ${code}`}`,
+                        friendly: `✗ Failed to search: ${stderr || `exit code ${code}`}`,
                         important: {
                             text: text,
                         },
@@ -215,7 +215,7 @@ export async function executeGrep(args: ToolExecutionArgs): Promise<ToolOutput> 
             proc.on('error', (error: Error) => {
                 const errorOutput: ToolOutput = {
                     tool: 'grep',
-                    friendly: `ERROR: Failed to search: ${error.message}`,
+                    friendly: `✗ Failed to search: ${error.message}`,
                     important: {
                         text: text,
                     },
@@ -230,7 +230,7 @@ export async function executeGrep(args: ToolExecutionArgs): Promise<ToolOutput> 
     } catch (error) {
         const errorOutput: ToolOutput = {
             tool: 'grep',
-            friendly: `ERROR: Failed to search: ${error instanceof Error ? error.message : String(error)}`,
+            friendly: `✗ Failed to search: ${error instanceof Error ? error.message : String(error)}`,
             important: {
                 text: text,
             },

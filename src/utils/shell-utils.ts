@@ -2,6 +2,8 @@
  * Shell command utilities that work across Bun and Node.js environments
  */
 
+import { Config } from '../core/config.js';
+
 export interface ShellResult {
     success: boolean;
     exitCode: number;
@@ -39,6 +41,11 @@ export class ShellUtils {
         timeoutSeconds: number
     ): Promise<ShellResult> {
         const timeoutCommand = `timeout -k 5 ${timeoutSeconds}s bash -c "${command.replace(/"/g, '\\"')}"`;
+        
+        if (Config.debug) {
+            console.log(`🔧 Debug: Command: ${timeoutCommand}`);
+        }
+        
         return await this.executeCommand(timeoutCommand);
     }
 

@@ -19,8 +19,8 @@ describe('Edit Command with Snippets', () => {
     let originalEditor: string | undefined;
 
     beforeEach(async () => {
-        // Create a temporary directory for test snippets
-        tempSnippetDir = fs.mkdtempSync(path.join(os.tmpdir(), 'aicoder-test-snippets-'));
+        // Create a temporary directory for test snippets in current directory
+        tempSnippetDir = fs.mkdtempSync(path.join(process.cwd(), '.test-snippets-'));
 
         // Mock the SNIPPETS_DIR to use our temp directory
         const originalSnippetDir = SNIPPETS_DIR;
@@ -101,8 +101,10 @@ describe('Edit Command with Snippets', () => {
             delete process.env.EDITOR;
         }
 
-        // Clean up temp directory
-        fs.rmSync(tempSnippetDir, { recursive: true, force: true });
+        // Clean up temp directory if it exists
+        if (tempSnippetDir && fs.existsSync(tempSnippetDir)) {
+            fs.rmSync(tempSnippetDir, { recursive: true, force: true });
+        }
     });
 
     it('should handle edit command message with snippets', async () => {

@@ -78,12 +78,19 @@ export async function executeRunShellCommand(
             result = await ShellUtils.executeCommand(command);
         }
 
-        // Create friendly message
-        const friendlyMessage = result.success
-            ? `✓ Command completed (exit code: ${result.exitCode})`
-            : result.exitCode === 124
-              ? `Command timed out after ${timeout}s (exit code: 124)`
-              : `✗ Command failed (exit code: ${result.exitCode})`;
+        // Create friendly message with better debugging
+        let friendlyMessage: string;
+        if (result.success) {
+            friendlyMessage = `✓ Command completed (exit code: ${result.exitCode})`;
+        } else if (result.exitCode === 124) {
+            friendlyMessage = `Command timed out after ${timeout}s (exit code: 124)`;
+        } else {
+            friendlyMessage = `✗ Command failed (exit code: ${result.exitCode})`;
+            // Add stderr to friendly message for better debugging
+            if (result.stderr.trim()) {
+                friendlyMessage += ` - ${result.stderr.trim()}`;
+            }
+        }
 
         return {
             tool: 'run_shell_command',
@@ -92,6 +99,12 @@ export async function executeRunShellCommand(
                 command,
                 success: result.success,
                 timedOut: result.exitCode === 124,
+                debugInfo: {
+                    hasStdout: result.stdout.trim().length > 0,
+                    hasStderr: result.stderr.trim().length > 0,
+                    exitCode: result.exitCode,
+                    success: result.success
+                }
             },
             detailed: {
                 reason,

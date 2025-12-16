@@ -19,6 +19,7 @@ import type {
 } from './types/index.js';
 import { ToolManager } from './tool-manager.js';
 import { ToolFormatter, type ToolOutput } from './tool-formatter.js';
+import { CouncilCommand } from './commands/council.js';
 import { InputHandler } from './input-handler.js';
 import { CommandHandler } from './command-handler.js';
 import { pluginSystem } from './plugin-system.js';
@@ -26,6 +27,7 @@ import { ContextBar } from './context-bar.js';
 import { StreamUtils } from '../utils/stream-utils.js';
 import { PromptBuilder } from '../prompts/prompt-builder.js';
 import { expandSnippets } from './snippet-utils.js';
+import { MemoryManager } from './memory-manager.js';
 
 export class AICoder {
     private stats: Stats;
@@ -38,6 +40,7 @@ export class AICoder {
     private isRunning = true;
     private isProcessing = false;
     private approvalWasShown = false;
+    private nextPrompt: string | null = null;
     
     private notifyHooks: NotificationHooks | null = null;
 
@@ -53,7 +56,8 @@ export class AICoder {
         this.commandHandler = new CommandHandler(
             this.messageHistory,
             this.inputHandler,
-            this.stats
+            this.stats,
+            this
         );
         this.contextBar = new ContextBar();
 
@@ -66,6 +70,33 @@ export class AICoder {
      */
     async initialize(): Promise<void> {
         await this.initializeSystemPrompt();
+        await this.initializeMemory();
+    }
+
+    /**
+     * Initialize memory system
+     */
+    private async initializeMemory(): Promise<void> {
+        try {
+            const memoryManager = MemoryManager.getInstance();
+            const memories = await memoryManager.loadAutoLoadMemories();
+            
+            if (memories.length > 0) {
+                // Inject memories into message history
+                for (const memory of memories) {
+                    if (memory.role === 'user') {
+                        this.messageHistory.addUserMessage(memory.content);
+                    } else if (memory.role === 'assistant') {
+                        this.messageHistory.addAssistantMessage({
+                            content: memory.content,
+                            tool_calls: []
+                        });
+                    }
+                }
+            }
+        } catch (error) {
+            LogUtils.warn(`Memory initialization failed: ${error}`);
+        }
     }
 
     /**
@@ -285,6 +316,18 @@ export class AICoder {
 
         // Interactive mode
         Config.printStartupInfo();
+        
+        // Calculate and display startup time if AICODER_START_TIME is set
+        const startTimeStr = process.env.AICODER_START_TIME;
+        if (startTimeStr) {
+            const currentTime = Date.now() / 1000; // Convert to seconds
+            const startTime = parseFloat(startTimeStr);
+            if (!isNaN(startTime) && currentTime > startTime) {
+                const elapsedSeconds = currentTime - startTime;
+                console.log(`Total startup time: ${elapsedSeconds.toFixed(2)} seconds`);
+            }
+        }
+        
         LogUtils.success('Type your message or /help for commands.');
 
         while (this.isRunning) {
@@ -294,11 +337,15 @@ export class AICoder {
                     await this.performAutoCompaction();
                 }
 
-                // Get user input (with notification hook)
-                await this.callNotifyHook('onBeforeUserPrompt');
-                const userInput = await this.inputHandler.getUserInput();
-
-                
+                // Check if there's a next prompt to execute
+                let userInput: string;
+                if (this.hasNextPrompt()) {
+                    userInput = this.getNextPrompt()!;
+                } else {
+                    // Get user input (with notification hook)
+                    await this.callNotifyHook('onBeforeUserPrompt');
+                    userInput = await this.inputHandler.getUserInput();
+                }
 
                 const trimmedInput = userInput.trim();
                 if (!trimmedInput) {
@@ -742,5 +789,28 @@ export class AICoder {
         } catch (error) {
             // Silently fail - notifications aren't critical
         }
+    }
+
+    /**
+     * Set the next prompt to be executed automatically
+     */
+    public setNextPrompt(prompt: string): void {
+        this.nextPrompt = prompt;
+    }
+
+    /**
+     * Get and clear the next prompt
+     */
+    public getNextPrompt(): string | null {
+        const prompt = this.nextPrompt;
+        this.nextPrompt = null; // Clear after getting
+        return prompt;
+    }
+
+    /**
+     * Check if there's a next prompt pending
+     */
+    public hasNextPrompt(): boolean {
+        return this.nextPrompt !== null;
     }
 }

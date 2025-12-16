@@ -1,0 +1,10 @@
+[
+  {
+    "role": "user",
+    "content": "Security must be considered in every implementation. Validate inputs, sanitize outputs, use secure defaults, and never expose sensitive information."
+  },
+  {
+    "role": "assistant",
+    "content": "I will implement with security-first mindset: input validation, output sanitization, secure defaults, least privilege principle, and comprehensive error handling that doesn't leak sensitive information."
+  }
+]

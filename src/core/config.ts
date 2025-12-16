@@ -81,10 +81,71 @@ export class Config {
         return Number.parseInt(process.env.FORCE_COMPACT_SIZE || '5', 10);
     }
 
+    // Retry Configuration
+    static get maxRetries(): number {
+        return Number.parseInt(process.env.MAX_RETRIES || '3', 10);
+    }
+
+    static get retryMaxWait(): number {
+        return Number.parseInt(process.env.RETRY_MAX_WAIT || '64', 10);
+    }
+
+    // Runtime Retry Configuration (overrides environment variables)
+    private static _runtimeMaxRetries: number | null = null;
+    private static _runtimeRetryMaxWait: number | null = null;
+    private static _runtimeAutoRetry: boolean | null = null;
+
+    // Getters that check runtime state first, then environment
+    static get effectiveMaxRetries(): number {
+        return this._runtimeMaxRetries ?? this.maxRetries;
+    }
+
+    static get effectiveRetryMaxWait(): number {
+        return this._runtimeRetryMaxWait ?? this.retryMaxWait;
+    }
+
+    static get effectiveAutoRetry(): boolean {
+        if (this._runtimeAutoRetry !== null) {
+            return this._runtimeAutoRetry;
+        }
+        // Default to enabled (current behavior)
+        return true;
+    }
+
+    // Setters for runtime configuration
+    static setRuntimeMaxRetries(value: number | null): void {
+        this._runtimeMaxRetries = value;
+    }
+
+    static setRuntimeRetryMaxWait(value: number | null): void {
+        this._runtimeRetryMaxWait = value;
+    }
+
+    static setRuntimeAutoRetry(value: boolean | null): void {
+        this._runtimeAutoRetry = value;
+    }
+
+    // Get current configuration state
+    static getRetryConfigStatus(): {
+        maxRetries: number;
+        maxBackoff: number;
+        autoRetry: boolean;
+        isRuntimeOverrides: boolean;
+    } {
+        return {
+            maxRetries: this.effectiveMaxRetries,
+            maxBackoff: this.effectiveRetryMaxWait,
+            autoRetry: this.effectiveAutoRetry,
+            isRuntimeOverrides: this._runtimeMaxRetries !== null || this._runtimeRetryMaxWait !== null || this._runtimeAutoRetry !== null
+        };
+    }
+
     // Tool Configuration
     static get maxToolResultSize(): number {
         return Number.parseInt(process.env.MAX_TOOL_RESULT_SIZE || '300000', 10);
     }
+
+
 
     // YOLO mode state
     private static _yoloMode = false;
@@ -100,6 +161,24 @@ export class Config {
 
     static setYoloMode(enabled: boolean): void {
         this._yoloMode = enabled;
+    }
+
+    // Auto-council context reset mode
+    private static _autoCouncilResetContext = true;
+
+    static get autoCouncilResetContext(): boolean {
+        // Check environment variable first
+        if (process.env.AUTO_COUNCIL_RESET_CONTEXT === '0') {
+            return false;
+        } else if (process.env.AUTO_COUNCIL_RESET_CONTEXT === '1') {
+            return true;
+        }
+        // Fall back to runtime state
+        return this._autoCouncilResetContext;
+    }
+
+    static setAutoCouncilResetContext(enabled: boolean): void {
+        this._autoCouncilResetContext = enabled;
     }
 
     private static _sandboxDisabled = false;
@@ -223,6 +302,16 @@ export class Config {
                 `${this.colors.green}  Auto-compaction enabled (context: ${this.contextSize} tokens, triggers at ${this.contextCompactPercentage}%)${this.colors.reset}`
             );
         }
+
+        if (Config.autoCouncilResetContext) {
+            console.log(
+                `${this.colors.green}  Auto-council uses context reset (fresh context each turn)${this.colors.reset}`
+            );
+        } else {
+            console.log(
+                `${this.colors.yellow}  Auto-council preserves context (traditional approach)${this.colors.reset}`
+            );
+        }
     }
 
     /**
@@ -231,7 +320,11 @@ export class Config {
      */
     static reset(): void {
         this._yoloMode = false;
+        this._autoCouncilResetContext = true; // Default to true
         this._sandboxDisabled = false;
         this._detailMode = false;
+        this._runtimeMaxRetries = null;
+        this._runtimeRetryMaxWait = null;
+        this._runtimeAutoRetry = null;
     }
 }

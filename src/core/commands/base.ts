@@ -2,9 +2,15 @@ import type { MessageHistory } from '../message-history.js';
 import type { InputHandler } from '../input-handler.js';
 import type { Stats } from '../stats.js';
 
-// Forward declaration to avoid circular import
+// Forward declarations to avoid circular imports
 export interface CommandHandler {
     getAllCommands(): Map<string, BaseCommand>;
+}
+
+declare class AICoder {
+    setNextPrompt(prompt: string): void;
+    getNextPrompt(): string | null;
+    hasNextPrompt(): boolean;
 }
 
 export interface CommandContext {
@@ -12,6 +18,7 @@ export interface CommandContext {
     inputHandler: InputHandler;
     stats: Stats;
     commandHandler?: CommandHandler;
+    aiCoder?: AICoder;
 }
 
 export interface CommandResult {

@@ -184,7 +184,13 @@ PERFORMANCE NOTE:
 
                 // Check if file was read first
                 if (!FileUtils.wasFileRead(path)) {
-                    warning = 'File was not read first - recommend reading file before editing';
+                    return {
+                        tool: 'edit_file',
+                        summary: `Edit file: ${path}`,
+                        content: `Error: File "${path}" exists but wasn't read first. Use read_file('${path}') before editing to prevent accidental data loss.`,
+                        warning: 'File must be read first',
+                        canApprove: false,
+                    };
                 }
 
                 // Read current content
@@ -273,11 +279,16 @@ export async function executeEditFile(
     const { path, old_string, new_string } = args as unknown as EditFileParams;
     try {
 
-        // Safety check: File must have been read first (tracked by FileUtils)
+        // Handle file creation (old_string is empty) - no read required
+        if (old_string === '') {
+            return await createFile(path, new_string);
+        }
+
+        // Safety check: For existing files, must have been read first (tracked by FileUtils)
         if (!FileUtils.wasFileRead(path)) {
             const errorOutput: ToolOutput = {
                 tool: 'edit_file',
-                friendly: `WARNING: Must read file '${path}' first before editing`,
+                friendly: `✗ Must read file '${path}' first before editing`,
                 important: {
                     path: path,
                 },
@@ -289,17 +300,12 @@ export async function executeEditFile(
             return errorOutput;
         }
 
-        // Handle file creation (old_string is empty)
-        if (old_string === '') {
-            return await createFile(path, new_string);
-        }
-
         // Handle content replacement
         return await replaceContent(path, old_string, new_string);
     } catch (error) {
         const errorOutput: ToolOutput = {
             tool: 'edit_file',
-            friendly: `ERROR: Failed to edit '${args.path}': ${error instanceof Error ? error.message : String(error)}`,
+            friendly: `✗ Failed to edit '${args.path}': ${error instanceof Error ? error.message : String(error)}`,
             important: {
                 path: args.path,
             },
@@ -322,7 +328,7 @@ async function createFile(path: string, content: string): Promise<ToolOutput> {
         if (exists) {
             const errorOutput: ToolOutput = {
                 tool: 'edit_file',
-                friendly: `WARNING: File '${path}' already exists`,
+                friendly: `✗ File '${path}' already exists`,
                 important: {
                     path: path,
                 },
@@ -388,7 +394,7 @@ async function replaceContent(
             const suggestion = generateNotFoundSuggestion(content, oldString, path);
             const errorOutput: ToolOutput = {
                 tool: 'edit_file',
-                friendly: `ERROR: Text not found in '${path}' - check exact match including whitespace`,
+                friendly: `✗ Text not found in '${path}' - check exact match including whitespace`,
                 important: {
                     path: path,
                 },

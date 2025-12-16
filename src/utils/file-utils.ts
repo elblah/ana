@@ -28,7 +28,7 @@ export class FileUtils {
     /**
      * Check if a path is allowed by sandbox rules
      */
-    static checkSandbox(path: string, context = 'file operation'): boolean {
+    static checkSandbox(path: string): boolean {
         if (Config?.sandboxDisabled) {
             return true;
         }
@@ -47,7 +47,7 @@ export class FileUtils {
         // Must either be exactly the current dir or start with current dir + '/'
         if (!(resolvedPath === this.currentDir || resolvedPath.startsWith(currentDirWithSlash))) {
             console.log(
-                `${Config?.colors.yellow || ''}[x] Sandbox: ${context} trying to access "${resolvedPath}" outside current directory "${this.currentDir}"${Config?.colors.reset || ''}`
+                `${Config?.colors.yellow || ''}[x] Sandbox: Access to "${resolvedPath}" outside current directory "${this.currentDir}" not allowed${Config?.colors.reset || ''}`
             );
             return false;
         }
@@ -55,7 +55,7 @@ export class FileUtils {
         // Also check for obvious parent directory traversal
         if (path.includes('../')) {
             console.log(
-                `${Config?.colors.yellow || ''}[x] Sandbox: ${context} trying to access "${path}" (contains parent traversal)${Config?.colors.reset || ''}`
+                `${Config?.colors.yellow || ''}[x] Sandbox: Path "${path}" contains parent traversal and is not allowed${Config?.colors.reset || ''}`
             );
             return false;
         }
@@ -94,8 +94,8 @@ export class FileUtils {
      */
     static async readFileWithSandbox(path: string): Promise<string> {
         // Check sandbox first
-        if (!this.checkSandbox(path, 'read_file')) {
-            throw new Error(`read_file: path "${path}" outside current directory not allowed`);
+        if (!this.checkSandbox(path)) {
+            throw new Error(`Path "${path}" is outside current directory and not allowed`);
         }
 
         return await this.readFile(path);
@@ -129,8 +129,8 @@ export class FileUtils {
      */
     static async writeFileWithSandbox(path: string, content: string): Promise<string> {
         // Check sandbox first
-        if (!this.checkSandbox(path, 'write_file')) {
-            throw new Error(`write_file: path "${path}" outside current directory not allowed`);
+        if (!this.checkSandbox(path)) {
+            throw new Error(`Path "${path}" is outside current directory and not allowed`);
         }
 
         return await this.writeFile(path, content);
@@ -175,7 +175,7 @@ export class FileUtils {
      */
     static fileExistsWithSandbox(path: string): boolean {
         // Check sandbox first
-        if (!this.checkSandbox(path, 'file_exists')) {
+        if (!this.checkSandbox(path)) {
             return false;
         }
 
@@ -187,7 +187,7 @@ export class FileUtils {
      */
     static async fileExistsWithSandboxAsync(path: string): Promise<boolean> {
         // Check sandbox first
-        if (!this.checkSandbox(path, 'file_exists')) {
+        if (!this.checkSandbox(path)) {
             return false;
         }
 
@@ -202,9 +202,9 @@ export class FileUtils {
         const resolvedPath = path === '.' ? this.currentDir : resolve(path);
 
         // Check sandbox
-        if (!this.checkSandbox(resolvedPath, 'list_directory')) {
+        if (!this.checkSandbox(resolvedPath)) {
             throw new Error(
-                `list_directory: path "${path}" (resolves to "${resolvedPath}") outside current directory not allowed`
+                `Path "${path}" (resolves to "${resolvedPath}") is outside current directory and not allowed`
             );
         }
 
@@ -251,8 +251,8 @@ export class FileUtils {
      * Delete a file (with sandbox check)
      */
     static async deleteFile(path: string): Promise<void> {
-        if (!this.checkSandbox(path, 'delete_file')) {
-            throw new Error(`delete_file: path "${path}" outside current directory not allowed`);
+        if (!this.checkSandbox(path)) {
+            throw new Error(`Path "${path}" is outside current directory and not allowed`);
         }
 
         try {
@@ -275,5 +275,21 @@ export class FileUtils {
      */
     static getCurrentDir(): string {
         return this.currentDir;
+    }
+
+    /**
+     * Clear file tracking state (for testing only)
+     */
+    static clearFileTracking(): void {
+        this.readFiles.clear();
+    }
+
+    /**
+     * Reset all static state (for testing only)
+     * Used to ensure complete test isolation
+     */
+    static resetAllState(): void {
+        this.readFiles.clear();
+        this.currentDir = process.cwd();
     }
 }

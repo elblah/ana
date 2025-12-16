@@ -1,26 +1,24 @@
 import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
+import { TestEnvironment } from './test-utils.js';
 import { FileUtils } from '../src/utils/file-utils.js';
 import { TOOL_DEFINITION as WRITE_FILE_TOOL } from '../src/tools/internal/write-file.js';
 import { TOOL_DEFINITION as EDIT_FILE_TOOL } from '../src/tools/internal/edit-file.js';
 
 describe('No changes approval logic', () => {
-    const testFile = 'tmp/test-no-changes.txt';
+    let tempDir: string;
+    let testFile: string;
     const testContent = 'Hello, World!\nThis is a test file.\n';
 
     beforeEach(async () => {
-        // Ensure test directory exists
-        await Bun.write('tmp/.gitkeep', '');
+        tempDir = await TestEnvironment.setup();
+        testFile = `${tempDir}/test-no-changes.txt`;
+        
         // Create test file
         await Bun.write(testFile, testContent);
     });
 
     afterEach(async () => {
-        // Clean up test file
-        await Bun.file(testFile)
-            .delete()
-            .catch(() => {
-                // Ignore cleanup errors
-            });
+        await TestEnvironment.cleanup(tempDir);
     });
 
     describe('write_file tool', () => {

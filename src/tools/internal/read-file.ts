@@ -84,7 +84,7 @@ export async function executeReadFile(args: ToolExecutionArgs): Promise<ToolOutp
         } catch (error) {
             const errorOutput: ToolOutput = {
                 tool: 'read_file',
-                friendly: `ERROR: Failed to read file: ${error instanceof Error ? error.message : String(error)}`,
+                friendly: `✗ Failed to read file: ${error instanceof Error ? error.message : String(error)}`,
                 important: {
                     path: params.path,
                 },
@@ -169,7 +169,7 @@ export async function executeReadFile(args: ToolExecutionArgs): Promise<ToolOutp
     } catch (error) {
         const errorOutput: ToolOutput = {
             tool: 'read_file',
-            friendly: `ERROR: Failed to read file: ${error instanceof Error ? error.message : String(error)}`,
+            friendly: `✗ Failed to read file: ${error instanceof Error ? error.message : String(error)}`,
             important: {
                 path: params.path,
             },

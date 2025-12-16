@@ -9,6 +9,13 @@ import type { Stats } from './stats.js';
 import { CommandRegistry } from './commands/registry.js';
 import type { BaseCommand } from './commands/base.js';
 
+// Forward declaration to avoid circular import
+declare class AICoder {
+    setNextPrompt(prompt: string): void;
+    getNextPrompt(): string | null;
+    hasNextPrompt(): boolean;
+}
+
 export interface CommandResult {
     shouldQuit: boolean;
     runApiCall: boolean;
@@ -20,16 +27,18 @@ export interface CommandContext {
     inputHandler: InputHandler;
     stats: Stats;
     commandHandler?: CommandHandler;
+    aiCoder?: AICoder;
 }
 
 export class CommandHandler {
     private registry: CommandRegistry;
 
-    constructor(messageHistory: MessageHistory, inputHandler: InputHandler, stats: Stats) {
+    constructor(messageHistory: MessageHistory, inputHandler: InputHandler, stats: Stats, aiCoder?: AICoder) {
         const context: CommandContext = {
             messageHistory,
             inputHandler,
             stats,
+            aiCoder,
         };
         this.registry = new CommandRegistry(context);
 

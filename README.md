@@ -211,6 +211,10 @@ MAX_TOKENS=4096               # Maximum context size
 TEMPERATURE=0.7               # AI response randomness
 AUTO_APPROVE=false            # Auto-approve tool executions
 
+# Retry configuration
+MAX_RETRIES=3                 # Maximum number of retry attempts (default: 3)
+RETRY_MAX_WAIT=64             # Maximum backoff wait time in seconds (default: 64)
+
 # Plugin configuration
 DISABLE_PLUGINS=1             # Disable all plugins from loading
 ```
@@ -255,6 +259,13 @@ This project is licensed under the Apache License 2.0. See [LICENSE](LICENSE) fo
 
 - **Issues**: Report bugs and request features via GitHub Issues
 - **Documentation**: Check the `docs/` directory for detailed guides
+- **Community**: Join discussions in GitHub Discussions
+
+## Acknowledgments
+
+Built with:
+- [Bun.js](https://bun.sh/) - Fast JavaScript runtime
+- [TypeScript](https://www.typescriptlang.org/) - Type-safe JavaScript
 
 ---
 
