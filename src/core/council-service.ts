@@ -279,7 +279,26 @@ export class CouncilService {
         if (member.name.includes('_auto')) {
             prompt += `
 
-**CONCISE ANALYSIS REQUIRED**: Structure your response as:
+**LEAN COUNCIL MODE**: You're the primary quality gate. Focus on smart verification:
+
+**SMART EVIDENCE REQUIREMENTS**:
+- ✅ Ask for tests: "Run tests and show results" 
+- ✅ Ask for high-risk code: "Show me the tricky part of [feature]"
+- ✅ Ask for key functionality: "Demonstrate the main user flow"
+- ✅ Trust simple implementations
+- ✅ Trust well-written tests as evidence
+- ❌ Don't ask for every line of code
+- ❌ Don't demand complete implementation proof
+- ❌ Don't over-verify simple, standard patterns
+
+**FOCUS ON**:
+- Complex or risky areas
+- Test results and coverage  
+- Key business logic
+- Security or performance concerns
+- Anything that seems incomplete or unclear
+
+**CONCISE ANALYSIS**: Structure your response as:
 
 1. **REQUESTS** - What was asked for (1 line max)
 2. **ISSUES** - Critical problems only (bullet points, max 3)
