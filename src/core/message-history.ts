@@ -7,6 +7,9 @@ import type { Stats } from './stats.js';
 import { CompactionService } from './compaction-service.js';
 import { Config } from './config.js';
 import { estimateMessagesTokens, clearTokenCache, estimateTokens } from './token-estimator.js';
+import { JsonlUtils } from '../utils/jsonl-utils.js';
+import { FileUtils } from '../utils/file-utils.js';
+import { LogUtils } from '../utils/log-utils.js';
 import type { 
     Message, 
     MessageToolCall, 
@@ -35,6 +38,7 @@ export class MessageHistory {
     private compactionCount = 0;
     private apiClient: StreamingClient | null = null;
     private isCompacting = false; // Prevent concurrent compactions
+    private sessionFilePath: string | null = null;
 
     constructor(stats: Stats, apiClient?: StreamingClient) {
         this.stats = stats;
@@ -49,6 +53,73 @@ export class MessageHistory {
     }
 
     /**
+     * Initialize session file persistence
+     */
+    async initializeSessionFile(): Promise<void> {
+        const sessionFile = Config.sessionFile;
+        if (!sessionFile) {
+            return;
+        }
+
+        this.sessionFilePath = sessionFile;
+
+        try {
+            if (await FileUtils.fileExistsAsync(sessionFile)) {
+                // Load existing session (preserve current system prompt)
+                const loadedMessages = await JsonlUtils.readFile(sessionFile);
+                const currentSystemMessage = this.messages.find(msg => msg.role === 'system');
+                const nonSystemMessages = loadedMessages.filter(msg => msg.role !== 'system');
+                
+                this.messages = currentSystemMessage ? [currentSystemMessage, ...nonSystemMessages] : nonSystemMessages;
+                LogUtils.success(`Session loaded from ${sessionFile}`);
+            } else {
+                // Create new empty session file
+                await JsonlUtils.writeMessages(sessionFile, []);
+                LogUtils.success(`Session file created: ${sessionFile}`);
+            }
+        } catch (error) {
+            LogUtils.error(`Session file initialization error: ${error}`);
+        }
+    }
+
+    /**
+     * Append message to session file if configured
+     */
+    private async appendToSessionFile(message: Message): Promise<void> {
+        if (!this.sessionFilePath) {
+            return;
+        }
+
+        // Don't persist system messages - they're generated on startup
+        if (message.role === 'system') {
+            return;
+        }
+
+        try {
+            await JsonlUtils.appendMessage(this.sessionFilePath, message);
+        } catch (error) {
+            LogUtils.error(`Failed to append to session file: ${error}`);
+        }
+    }
+
+    /**
+     * Rewrite session file (used during compaction)
+     */
+    private async rewriteSessionFile(): Promise<void> {
+        if (!this.sessionFilePath) {
+            return;
+        }
+
+        try {
+            // Don't persist system messages in session file
+            const nonSystemMessages = this.messages.filter(msg => msg.role !== 'system');
+            await JsonlUtils.writeMessages(this.sessionFilePath, nonSystemMessages);
+        } catch (error) {
+            LogUtils.error(`Failed to rewrite session file: ${error}`);
+        }
+    }
+
+    /**
      * Add a system message
      */
     addSystemMessage(content: string): void {
@@ -59,6 +130,8 @@ export class MessageHistory {
         if (!this.initialSystemPrompt) {
             this.initialSystemPrompt = message;
         }
+        
+        // System messages are not persisted to session file
     }
 
     /**
@@ -70,6 +143,11 @@ export class MessageHistory {
         this.stats.incrementMessagesSent();
         // Update context size estimate
         this.estimateContext();
+        
+        // Persist to session file (fire and forget)
+        this.appendToSessionFile(message).catch(error => {
+            LogUtils.error(`Failed to append to session file: ${error}`);
+        });
     }
 
     /**
@@ -84,6 +162,11 @@ export class MessageHistory {
         this.messages.push(assistantMessage);
         // Update context size estimate
         this.estimateContext();
+        
+        // Persist to session file (fire and forget)
+        this.appendToSessionFile(assistantMessage).catch(error => {
+            LogUtils.error(`Failed to append to session file: ${error}`);
+        });
     }
 
     /**
@@ -97,6 +180,11 @@ export class MessageHistory {
                 tool_call_id: result.tool_call_id,
             };
             this.messages.push(toolMessage);
+            
+            // Persist each tool result to session file (fire and forget)
+            this.appendToSessionFile(toolMessage).catch(error => {
+                LogUtils.error(`Failed to append to session file: ${error}`);
+            });
         }
         // Update context size estimate
         this.estimateContext();
@@ -232,6 +320,9 @@ export class MessageHistory {
             if (this.messages.length < originalCount) {
                 this.compactionCount++;
                 console.log('[✓] Conversation compacted successfully');
+                
+                // Rewrite session file after compaction
+                await this.rewriteSessionFile();
             }
         } finally {
             this.isCompacting = false;
@@ -256,6 +347,9 @@ export class MessageHistory {
         if (this.messages.length < originalCount) {
             this.compactionCount++;
             console.log(`[✓] Force compacted ${n} round(s)`);
+            
+            // Rewrite session file after compaction
+            await this.rewriteSessionFile();
         }
     }
 
@@ -277,6 +371,9 @@ export class MessageHistory {
         if (this.messages.length < originalCount) {
             this.compactionCount++;
             console.log(`[✓] Force compacted ${n} message(s)`);
+            
+            // Rewrite session file after compaction
+            await this.rewriteSessionFile();
         }
     }
 

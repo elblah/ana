@@ -125,6 +125,22 @@ export class FileUtils {
     }
 
     /**
+     * Append to a file (no sandbox) - default behavior for internal use
+     */
+    static async appendFile(path: string, content: string): Promise<void> {
+        try {
+            // Use Node.js API for consistency across environments
+            const { appendFile } = await import('node:fs/promises');
+            await appendFile(path, content, 'utf8');
+        } catch (error) {
+            if (error instanceof Error) {
+                throw new Error(`Error appending to file '${path}': ${error.message}`);
+            }
+            throw new Error(`Error appending to file '${path}': ${error}`);
+        }
+    }
+
+    /**
      * Write to a file with sandbox check - for AI requests only
      */
     static async writeFileWithSandbox(path: string, content: string): Promise<string> {
@@ -267,6 +283,22 @@ export class FileUtils {
                 throw new Error(`Error deleting file '${path}': ${error.message}`);
             }
             throw new Error(`Error deleting file '${path}': ${error}`);
+        }
+    }
+
+    /**
+     * Remove a file (no sandbox) - for internal use/testing
+     */
+    static async removeFile(path: string): Promise<void> {
+        try {
+            if (typeof Bun !== 'undefined') {
+                await Bun.file(path).delete();
+            } else {
+                const { unlink } = await import('node:fs/promises');
+                await unlink(path);
+            }
+        } catch {
+            // Ignore errors on cleanup
         }
     }
 

@@ -1,6 +1,7 @@
 import { BaseCommand, type CommandResult } from './base.js';
 import { Config } from '../config.js';
 import { JsonUtils } from '../../utils/json-utils.js';
+import { JsonlUtils } from '../../utils/jsonl-utils.js';
 import { LogUtils } from '../../utils/log-utils.js';
 
 export class SaveCommand extends BaseCommand {
@@ -11,9 +12,17 @@ export class SaveCommand extends BaseCommand {
         const filename = args[0] || 'session.json';
 
         try {
-            const sessionData = this.context.messageHistory.getMessages();
+            const messages = this.context.messageHistory.getMessages();
 
-            await JsonUtils.writeFile(filename, sessionData as unknown);
+            // Check file extension to determine format
+            if (filename.endsWith('.jsonl')) {
+                // Save as JSONL format
+                await JsonlUtils.writeMessages(filename, messages);
+            } else {
+                // Save as JSON format (existing behavior)
+                await JsonUtils.writeFile(filename, messages as unknown);
+            }
+
             LogUtils.success(`Session saved to ${filename}`);
         } catch (error) {
             LogUtils.error(`Error saving session: ${error}`);

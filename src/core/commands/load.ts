@@ -3,6 +3,7 @@ import { Config } from '../config.js';
 import { FileUtils } from '../../utils/file-utils.js';
 import { LogUtils } from '../../utils/log-utils.js';
 import { JsonUtils } from '../../utils/json-utils.js';
+import { JsonlUtils } from '../../utils/jsonl-utils.js';
 
 export class LoadCommand extends BaseCommand {
     protected name = 'load';
@@ -17,10 +18,18 @@ export class LoadCommand extends BaseCommand {
                 return { shouldQuit: false, runApiCall: false };
             }
 
-            const sessionData = await JsonUtils.readFile(filename);
+            let messages: any[] = [];
 
-            // Handle both formats: direct array of messages or object with messages property
-            const messages = Array.isArray(sessionData) ? sessionData : sessionData.messages;
+            // Check file extension to determine format
+            if (filename.endsWith('.jsonl')) {
+                // Load as JSONL format
+                messages = await JsonlUtils.readFile(filename);
+            } else {
+                // Load as JSON format (existing behavior)
+                const sessionData = await JsonUtils.readFile(filename);
+                // Handle both formats: direct array of messages or object with messages property
+                messages = Array.isArray(sessionData) ? sessionData : sessionData.messages;
+            }
 
             if (messages && Array.isArray(messages)) {
                 this.context.messageHistory.setMessages(messages);

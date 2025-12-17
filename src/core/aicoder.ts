@@ -71,6 +71,7 @@ export class AICoder {
     async initialize(): Promise<void> {
         await this.initializeSystemPrompt();
         await this.initializeMemory();
+        await this.initializeSessionFile();
     }
 
     /**
@@ -96,6 +97,17 @@ export class AICoder {
             }
         } catch (error) {
             LogUtils.warn(`Memory initialization failed: ${error}`);
+        }
+    }
+
+    /**
+     * Initialize session file persistence
+     */
+    private async initializeSessionFile(): Promise<void> {
+        try {
+            await this.messageHistory.initializeSessionFile();
+        } catch (error) {
+            LogUtils.warn(`Session file initialization failed: ${error}`);
         }
     }
 

@@ -277,6 +277,11 @@ export class Config {
         }
     }
 
+    // Session file configuration
+    static get sessionFile(): string | null {
+        return process.env.SESSION_FILE || null;
+    }
+
     // Print configuration info at startup
     static printStartupInfo(): void {
         console.log(`${this.colors.green}Configuration:${this.colors.reset}`);
@@ -311,6 +316,11 @@ export class Config {
             console.log(
                 `${this.colors.yellow}  Auto-council preserves context (traditional approach)${this.colors.reset}`
             );
+        }
+
+        // Display session file if configured
+        if (this.sessionFile) {
+            console.log(`${this.colors.cyan}Session file: ${this.sessionFile}${this.colors.reset}`);
         }
     }
 
